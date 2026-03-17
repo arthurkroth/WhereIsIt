@@ -12,15 +12,21 @@ const { env } = require("../config/env");
  * Validating JWT and attaching {userId, role} to req.user.
  */
 function requireAuth(req, res, next) {
+  // Check Authorization header first, then fall back to query param (for file URLs)
   const authHeader = req.headers.authorization;
-  if (!authHeader || !authHeader.startsWith("Bearer ")) {
+  const queryToken = req.query.token;
+
+  const token = authHeader?.startsWith("Bearer ")
+    ? authHeader.replace("Bearer ", "").trim()
+    : queryToken || null;
+
+  if (!token) {
     return res.status(401).json({ error: "Missing or invalid Authorization header" });
   }
 
-  const token = authHeader.replace("Bearer ", "").trim();
   try {
     const decoded = jwt.verify(token, env.jwt.secret);
-    req.user = decoded; // { userId, role }
+    req.user = decoded;
     return next();
   } catch {
     return res.status(401).json({ error: "Invalid or expired token" });

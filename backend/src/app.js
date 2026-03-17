@@ -11,7 +11,7 @@ const helmet = require("helmet");
 const rateLimit = require("express-rate-limit");
 
 const { authRoutes } = require("./routes/authRoutes");
-const { receiptRoutes } = require("./routes/receiptRoutes");
+const { receiptRoutes } = require('./routes/receiptRoutes');
 const { adminRoutes } = require("./routes/adminRoutes");
 const { errorMiddleware } = require("./middleware/errorMiddleware");
 
@@ -20,6 +20,10 @@ const { errorMiddleware } = require("./middleware/errorMiddleware");
  */
 function createApp() {
   const app = express();
+
+  // Trust the first proxy hop - required for express-rate-limit to work correctly
+  // without this, rate limiting throws a ValidationError on startup
+  app.set('trust proxy', 1);
 
   app.use(helmet());
   app.use(cors({ origin: true, credentials: true }));
@@ -37,7 +41,7 @@ function createApp() {
   app.get("/health", (_req, res) => res.json({ ok: true }));
 
   app.use("/auth", authRoutes);
-  app.use("/receipts", receiptRoutes);
+  app.use('/receipts', receiptRoutes);
   app.use("/admin", adminRoutes);
 
   app.use(errorMiddleware);

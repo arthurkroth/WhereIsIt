@@ -6,12 +6,23 @@
  */
 
 /**
- * Wrapping async route handlers so errors are passed to Express error middleware.
- * @param {(req:any,res:any,next:any)=>Promise<void>} fn
+ * AsyncHandler Utility
+ * Wraps async route handlers to automatically catch errors and pass them to Express error middleware.
+ * This prevents having to write try-catch blocks in every controller function.
+ * 
+ * @param {Function} fn - Async function to wrap (controller function)
+ * @returns {Function} Express middleware function
+ * 
+ * USAGE:
+ * router.post('/endpoint', asyncHandler(async (req, res) => {
+ *   // Your async code here
+ *   // Errors automatically caught and passed to error middleware
+ * }));
  */
 function asyncHandler(fn) {
   return (req, res, next) => {
-    fn(req, res, next).catch(next);
+    // Execute the function and catch any errors
+    Promise.resolve(fn(req, res, next)).catch(next);
   };
 }
 

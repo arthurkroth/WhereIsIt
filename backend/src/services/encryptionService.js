@@ -6,50 +6,135 @@
  */
 
 
-const crypto = require("crypto");
-const { env } = require("../config/env");
+/**
+ * Encryption Service for Sensitive Data
+ * Uses AES-256-GCM for field-level encryption
+ * Author: Arthur Kroth - x22166971
+ * WhereIsIt Project
+ */
+
+const crypto = require('crypto');
 
 /**
- * AES-256-GCM field encryption.
- * Output: base64(iv + tag + ciphertext)
+ * EncryptionService class handles encryption and decryption of sensitive data.
+ * 
+ * SECURITY FEATURES:
+ * - AES-256-GCM algorithm (authenticated encryption)
+ * - Unique IV (initialization vector) for each encryption
+ * - Authentication tag validation on decryption
+ * - Key derivation from environment variable
+ * 
+ * USAGE:
+ * const encryption = new EncryptionService();
+ * const encrypted = encryption.encrypt('sensitive data');
+ * const decrypted = encryption.decrypt(encrypted);
  */
 class EncryptionService {
   constructor() {
-    const keyBytes = Buffer.from(env.encryption.fieldKeyBase64, "base64");
-    if (keyBytes.length !== 32) {
-      throw new Error("FIELD_ENC_KEY_BASE64 must decode to 32 bytes for AES-256-GCM");
-    }
-    this.key = keyBytes;
+    // Get encryption key from environment or use default for development
+    // IMPORTANT: In production, use a strong random key stored in .env
+    const encryptionKey = process.env.ENCRYPTION_KEY || 'default-dev-key-change-in-production-32char';
+    
+    // Derive a 256-bit (32-byte) key from the encryption key
+    this.key = crypto.scryptSync(encryptionKey, 'salt', 32);
+    
+    // Algorithm to use
+    this.algorithm = 'aes-256-gcm';
   }
 
   /**
-   * Encrypts sensitive fields (store name, product description).
-   * @param {string} plaintext
-   * @returns {string}
+   * Encrypts a string value.
+   * Returns a base64-encoded string containing: IV:AuthTag:EncryptedData
+   * 
+   * @param {string} plaintext - Data to encrypt
+   * @returns {string} Encrypted data (base64)
    */
   encrypt(plaintext) {
-    const iv = crypto.randomBytes(12);
-    const cipher = crypto.createCipheriv("aes-256-gcm", this.key, iv);
-    const ciphertext = Buffer.concat([cipher.update(plaintext, "utf8"), cipher.final()]);
-    const tag = cipher.getAuthTag();
-    return Buffer.concat([iv, tag, ciphertext]).toString("base64");
+    try {
+      // Generate a random IV (initialization vector) for this encryption
+      const iv = crypto.randomBytes(16);
+      
+      // Create cipher
+      const cipher = crypto.createCipheriv(this.algorithm, this.key, iv);
+      
+      // Encrypt the data
+      let encrypted = cipher.update(plaintext, 'utf8', 'hex');
+      encrypted += cipher.final('hex');
+      
+      // Get the authentication tag
+      const authTag = cipher.getAuthTag();
+      
+      // Combine IV, auth tag, and encrypted data
+      // Format: IV(16 bytes):AuthTag(16 bytes):EncryptedData
+      const combined = Buffer.concat([
+        iv,
+        authTag,
+        Buffer.from(encrypted, 'hex')
+      ]);
+      
+      // Return as base64 string
+      return combined.toString('base64');
+    } catch (error) {
+      console.error('Encryption error:', error);
+      throw new Error('Failed to encrypt data');
+    }
   }
 
   /**
-   * Decrypts the base64 payload produced by encrypt().
-   * @param {string} payloadBase64
-   * @returns {string}
+   * Decrypts an encrypted string.
+   * Expects format: IV:AuthTag:EncryptedData (base64)
+   * 
+   * @param {string} encryptedData - Encrypted data (base64)
+   * @returns {string} Decrypted plaintext
    */
-  decrypt(payloadBase64) {
-    const payload = Buffer.from(payloadBase64, "base64");
-    const iv = payload.subarray(0, 12);
-    const tag = payload.subarray(12, 28);
-    const ciphertext = payload.subarray(28);
+  decrypt(encryptedData) {
+    try {
+      // Decode from base64
+      const combined = Buffer.from(encryptedData, 'base64');
+      
+      // Extract IV (first 16 bytes)
+      const iv = combined.slice(0, 16);
+      
+      // Extract auth tag (next 16 bytes)
+      const authTag = combined.slice(16, 32);
+      
+      // Extract encrypted data (remaining bytes)
+      const encrypted = combined.slice(32);
+      
+      // Create decipher
+      const decipher = crypto.createDecipheriv(this.algorithm, this.key, iv);
+      
+      // Set the authentication tag
+      decipher.setAuthTag(authTag);
+      
+      // Decrypt the data
+      let decrypted = decipher.update(encrypted, null, 'utf8');
+      decrypted += decipher.final('utf8');
+      
+      return decrypted;
+    } catch (error) {
+      console.error('Decryption error:', error);
+      // Return a placeholder if decryption fails
+      // This prevents the app from crashing if encryption key changes
+      return '[Decryption Failed]';
+    }
+  }
 
-    const decipher = crypto.createDecipheriv("aes-256-gcm", this.key, iv);
-    decipher.setAuthTag(tag);
-    const plaintext = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
-    return plaintext.toString("utf8");
+  /**
+   * Checks if the encryption service is properly configured.
+   * 
+   * @returns {boolean} True if encryption is working
+   */
+  test() {
+    try {
+      const testString = 'test-data-12345';
+      const encrypted = this.encrypt(testString);
+      const decrypted = this.decrypt(encrypted);
+      
+      return testString === decrypted;
+    } catch (error) {
+      return false;
+    }
   }
 }
 

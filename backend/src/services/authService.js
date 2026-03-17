@@ -11,16 +11,27 @@ const { env } = require("../config/env");
 const { db } = require("../config/db");
 const { MfaService } = require("./mfaService");
 
+/**
+ * AuthService
+ * Handles all authentication-related business logic.
+ * 
+ * SECURITY FEATURES:
+ * - Password hashing with bcrypt (12 rounds)
+ * - JWT token generation and validation
+ * - MFA support with TOTP
+ * - Secure password validation
+ */
 class AuthService {
   constructor() {
     this.mfa = new MfaService();
   }
 
   /**
-   * Registering the user with a hashed password.
-   * @param {string} email
-   * @param {string} password
-   * @param {"FREE"|"PREMIUM"} role
+   * Registers a user with a hashed password.
+   * @param {string} email - User email
+   * @param {string} password - Plain text password
+   * @param {"FREE"|"PREMIUM"} role - User role/plan
+   * @returns {Promise<number>} User ID
    */
   async register(email, password, role) {
     const saltRounds = 12;
@@ -34,9 +45,10 @@ class AuthService {
   }
 
   /**
-   * Validating credentials and returning user row if correct.
-   * @param {string} email
-   * @param {string} password
+   * Validates credentials and returns user row if correct.
+   * @param {string} email - User email
+   * @param {string} password - Plain text password
+   * @returns {Promise<object|null>} User object or null
    */
   async validatePassword(email, password) {
     const [rows] = await db.execute("SELECT * FROM users WHERE email = ? LIMIT 1", [email]);
@@ -48,8 +60,9 @@ class AuthService {
   }
 
   /**
-   * Issuing a JWT for API authentication.
-   * @param {{id:number, role:"FREE"|"PREMIUM"|"ADMIN"}} user
+   * Issues a JWT for API authentication.
+   * @param {{id:number, role:string}} user - User object
+   * @returns {string} JWT token
    */
   issueJwt(user) {
     return jwt.sign({ userId: user.id, role: user.role }, env.jwt.secret, {
@@ -58,8 +71,9 @@ class AuthService {
   }
 
   /**
-   * Starts MFA setup by generating and storing a secret (MFA not enabled until confirmed).
-   * @param {number} userId
+   * Starts MFA setup by generating and storing a secret.
+   * @param {number} userId - User ID
+   * @returns {Promise<object>} Setup info with secret and otpauthUrl
    */
   async beginMfaSetup(userId) {
     const [rows] = await db.execute("SELECT email FROM users WHERE id = ? LIMIT 1", [userId]);
@@ -75,8 +89,9 @@ class AuthService {
 
   /**
    * Confirms MFA by validating a token and enabling MFA.
-   * @param {number} userId
-   * @param {string} token
+   * @param {number} userId - User ID
+   * @param {string} token - TOTP token
+   * @returns {Promise<boolean>} True if valid
    */
   async confirmMfa(userId, token) {
     const [rows] = await db.execute("SELECT mfa_secret FROM users WHERE id = ? LIMIT 1", [userId]);
@@ -91,8 +106,9 @@ class AuthService {
   }
 
   /**
-   * Checks if MFA is enabled.
-   * @param {number} userId
+   * Checks if MFA is enabled for user.
+   * @param {number} userId - User ID
+   * @returns {Promise<boolean>} True if MFA enabled
    */
   async requiresMfa(userId) {
     const [rows] = await db.execute("SELECT mfa_enabled FROM users WHERE id = ? LIMIT 1", [userId]);
@@ -100,9 +116,10 @@ class AuthService {
   }
 
   /**
-   * Verifies MFA token during login when enabled.
-   * @param {number} userId
-   * @param {string} token
+   * Verifies MFA token during login.
+   * @param {number} userId - User ID
+   * @param {string} token - TOTP token
+   * @returns {Promise<boolean>} True if valid
    */
   async verifyMfaForLogin(userId, token) {
     const [rows] = await db.execute("SELECT mfa_secret, mfa_enabled FROM users WHERE id = ? LIMIT 1", [userId]);
@@ -113,8 +130,9 @@ class AuthService {
   }
 
   /**
-   * Fetches role for JWT creation.
-   * @param {number} userId
+   * Fetches user role for JWT creation.
+   * @param {number} userId - User ID
+   * @returns {Promise<object|null>} User object with id and role
    */
   async getUserRole(userId) {
     const [rows] = await db.execute("SELECT id, role FROM users WHERE id = ? LIMIT 1", [userId]);
