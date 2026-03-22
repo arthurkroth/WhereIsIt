@@ -1,7 +1,6 @@
 /**
  * Authentication Validation Schemas
  * Author: Arthur Kroth - x22166971
- * Date: 03/10/2026
  * WhereIsIt Project
  */
 
@@ -10,7 +9,8 @@ const { z } = require("zod");
 const registerSchema = z.object({
   email: z.string().email(),
   password: z.string().min(10, "Password must be at least 10 characters"),
-  plan: z.enum(["FREE", "PREMIUM"]).default("FREE")
+  firstName: z.string().min(1, "First name is required").max(100),
+  lastName: z.string().min(1, "Last name is required").max(100)
 });
 
 const loginSchema = z.object({

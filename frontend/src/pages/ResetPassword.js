@@ -1,7 +1,6 @@
 /**
  * File: ResetPassword.js
  * Author: Arthur Kroth - x22166971
- * Date: 11/02/2026
  * WhereIsIt Project
  */
 

@@ -1,15 +1,14 @@
 /**
  * File: ReceiptUpload.js
  * Author: Arthur Kroth - x22166971
- * Date: 17/03/2026
  * WhereIsIt Project
  */
 
-import React, { useState, useRef } from 'react';
+import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Container, Card, Form, Button, Alert,
-  Spinner, ProgressBar, Row, Col, Badge
+  Spinner, ProgressBar, Row, Col
 } from 'react-bootstrap';
 import { uploadReceipt } from '../services/api';
 import api from '../services/api';
@@ -20,15 +19,21 @@ import api from '../services/api';
  *
  * WORKFLOW:
  * Step 1 - File selection and upload
- * Step 2 - Review and correct the OCR-extracted data before saving
- * Step 3 - Confirmed data is saved and user is redirected to receipts list
+ * Step 2 - Split-screen review:
+ *          LEFT  — editable form with extracted data (store, date, total, items)
+ *          RIGHT — the original receipt image/PDF with zoom in/out controls
+ *          This allows the user to look at the receipt and correct the form
+ *          without switching back and forth between pages.
+ * Step 3 - Confirmed data is saved and user is redirected to receipts list.
  *
  * FEATURES:
  * - Drag-and-drop file upload
  * - Client-side file validation (type, size)
  * - Preview of selected image
  * - OCR processing with progress bar
- * - Editable review step so users can fix incorrect OCR results
+ * - Split-screen review with receipt preview and zoom controls
+ * - Multi-item support with add/remove
+ * - Total price field visible and editable in review step
  *
  * SECURITY:
  * - File type validation (PNG, JPEG, PDF only)
@@ -39,7 +44,7 @@ function ReceiptUpload() {
   const navigate = useNavigate();
   const fileInputRef = useRef(null);
 
-  // File selection state
+  // Step 1: File selection state
   const [selectedFile, setSelectedFile] = useState(null);
   const [previewUrl, setPreviewUrl] = useState(null);
   const [dragActive, setDragActive] = useState(false);
@@ -49,33 +54,74 @@ function ReceiptUpload() {
   const [uploadProgress, setUploadProgress] = useState(0);
   const [error, setError] = useState('');
 
-  // After OCR - review step state
-  // When this is set, we show the review form instead of the upload form
+  // Step 2: Review step state
   const [receiptId, setReceiptId] = useState(null);
   const [ocrSuccess, setOcrSuccess] = useState(false);
-  const [reviewData, setReviewData] = useState(null);
+  const [reviewHeader, setReviewHeader] = useState(null);
+  const [reviewItems, setReviewItems] = useState([]);
+
+  // Receipt preview state for the right panel
+  // fileUrl holds the blob URL for the uploaded receipt (image or PDF)
+  const [fileUrl, setFileUrl] = useState(null);
+  const [isPdf, setIsPdf] = useState(false);
+  const [zoomLevel, setZoomLevel] = useState(100);
+
+  // Save state
   const [saving, setSaving] = useState(false);
   const [saveSuccess, setSaveSuccess] = useState(false);
 
   const ALLOWED_TYPES = ['image/png', 'image/jpeg', 'image/jpg', 'application/pdf'];
   const MAX_FILE_SIZE = 10 * 1024 * 1024; // 10MB
+  const MIN_ZOOM = 50;
+  const MAX_ZOOM = 300;
+  const ZOOM_STEP = 25;
+
+  /**
+   * Fetches the uploaded receipt file as a blob URL when the review step opens.
+   * We use a blob URL to avoid cross-origin issues with <img> and <embed> tags
+   * when the backend is on a different port from the frontend.
+   */
+  useEffect(() => {
+    if (!receiptId) return;
+
+    const fetchReceiptFile = async () => {
+      try {
+        const token = localStorage.getItem('token');
+        const response = await fetch(
+          `http://localhost:3001/receipts/${receiptId}/file`,
+          { headers: { Authorization: `Bearer ${token}` } }
+        );
+        if (!response.ok) return;
+
+        const blob = await response.blob();
+        const url = URL.createObjectURL(blob);
+        setFileUrl(url);
+      } catch (err) {
+        console.error('Failed to load receipt preview:', err);
+      }
+    };
+
+    fetchReceiptFile();
+
+    // Cleanup blob URL when component unmounts or receiptId changes
+    return () => {
+      if (fileUrl) URL.revokeObjectURL(fileUrl);
+    };
+  }, [receiptId]);
 
   /**
    * Validates a file's type and size before upload.
    * @param {File} file - File to validate
-   * @returns {object} Validation result {valid: boolean, error: string}
+   * @returns {Object} {valid: boolean, error: string}
    */
   const validateFile = (file) => {
     if (!file) return { valid: false, error: 'No file selected' };
-
     if (!ALLOWED_TYPES.includes(file.type)) {
       return { valid: false, error: 'Invalid file type. Please upload PNG, JPEG, or PDF files only.' };
     }
-
     if (file.size > MAX_FILE_SIZE) {
       return { valid: false, error: `File size exceeds ${MAX_FILE_SIZE / 1024 / 1024}MB limit.` };
     }
-
     return { valid: true, error: null };
   };
 
@@ -86,18 +132,21 @@ function ReceiptUpload() {
    */
   const handleFileSelect = (file) => {
     const validation = validateFile(file);
-
     if (!validation.valid) {
       setError(validation.error);
       return;
     }
-
     setError('');
     setSelectedFile(file);
-    setReviewData(null);
+    setReviewHeader(null);
+    setReviewItems([]);
     setReceiptId(null);
+    setFileUrl(null);
 
-    // Create a preview URL for image files only (not PDFs)
+    // Detect file type for the preview panel
+    setIsPdf(file.type === 'application/pdf');
+
+    // Create a local preview URL for image files only (not PDFs)
     if (file.type.startsWith('image/')) {
       const reader = new FileReader();
       reader.onloadend = () => setPreviewUrl(reader.result);
@@ -109,7 +158,7 @@ function ReceiptUpload() {
 
   /**
    * Handles the file input change event.
-   * @param {Event} e - Change event from file input
+   * @param {Event} e - Change event
    */
   const handleFileChange = (e) => {
     const file = e.target.files?.[0];
@@ -117,17 +166,14 @@ function ReceiptUpload() {
   };
 
   /**
-   * Handles drag events for the drop zone (enter, over, leave).
+   * Handles drag events for the drop zone.
    * @param {Event} e - Drag event
    */
   const handleDrag = (e) => {
     e.preventDefault();
     e.stopPropagation();
-    if (e.type === 'dragenter' || e.type === 'dragover') {
-      setDragActive(true);
-    } else if (e.type === 'dragleave') {
-      setDragActive(false);
-    }
+    if (e.type === 'dragenter' || e.type === 'dragover') setDragActive(true);
+    else if (e.type === 'dragleave') setDragActive(false);
   };
 
   /**
@@ -144,45 +190,45 @@ function ReceiptUpload() {
 
   /**
    * Handles the upload form submission.
-   * Uploads the file to the backend, runs OCR, then shows the review step.
+   * Sends the file to the backend, waits for OCR, then shows the review step.
    * @param {Event} e - Submit event
    */
   const handleUploadSubmit = async (e) => {
     e.preventDefault();
-
     if (!selectedFile) {
       setError('Please select a file to upload');
       return;
     }
-
     setUploading(true);
     setError('');
     setUploadProgress(0);
 
     try {
-      // Simulate upload progress while waiting for the server
       const progressInterval = setInterval(() => {
-        setUploadProgress((prev) => Math.min(prev + 5, 90));
+        setUploadProgress(prev => Math.min(prev + 5, 90));
       }, 300);
 
       const response = await uploadReceipt(selectedFile);
-
       clearInterval(progressInterval);
       setUploadProgress(100);
 
-      // Store the receipt ID and OCR results for the review step
       const data = response.data;
       setReceiptId(data.receiptId);
       setOcrSuccess(data.ocrSuccess);
 
-      // Pre-populate the review form with whatever OCR extracted
-      setReviewData({
+      // Populate review form from OCR results
+      setReviewHeader({
         storeName: data.extractedData?.storeName || '',
         purchaseDate: data.extractedData?.purchaseDate || new Date().toISOString().split('T')[0],
-        productDescription: data.extractedData?.productDescription || '',
-        price: data.extractedData?.price || '',
+        totalPrice: data.extractedData?.totalPrice || '',
         warrantyMonths: data.extractedData?.warrantyMonths || 12
       });
+
+      setReviewItems(
+        data.extractedData?.items?.length > 0
+          ? data.extractedData.items
+          : [{ productDescription: '', price: '', warrantyMonths: 12 }]
+      );
 
     } catch (err) {
       setError(err.response?.data?.error || 'Failed to upload receipt. Please try again.');
@@ -193,17 +239,71 @@ function ReceiptUpload() {
   };
 
   /**
-   * Handles changes to the review form fields.
-   * @param {string} field - Field name to update
+   * Handles changes to the review header fields.
+   * @param {string} field - Field name
    * @param {string} value - New value
    */
-  const handleReviewChange = (field, value) => {
-    setReviewData((prev) => ({ ...prev, [field]: value }));
+  const handleHeaderChange = (field, value) => {
+    setReviewHeader(prev => ({ ...prev, [field]: value }));
   };
 
   /**
-   * Saves the reviewed/corrected receipt data to the backend.
-   * Calls the PUT /receipts/:id endpoint with the confirmed data.
+   * Handles changes to a specific item in the review items list.
+   * @param {number} index - Item index
+   * @param {string} field - Field name
+   * @param {string} value - New value
+   */
+  const handleItemChange = (index, field, value) => {
+    setReviewItems(prev => {
+      const updated = [...prev];
+      updated[index] = { ...updated[index], [field]: value };
+      return updated;
+    });
+  };
+
+  /**
+   * Adds a new blank item row to the review items list.
+   */
+  const handleAddItem = () => {
+    setReviewItems(prev => [
+      ...prev,
+      { productDescription: '', price: '', warrantyMonths: 12 }
+    ]);
+  };
+
+  /**
+   * Removes an item from the review items list.
+   * Always keeps at least one item row.
+   * @param {number} index - Index of the item to remove
+   */
+  const handleRemoveItem = (index) => {
+    if (reviewItems.length === 1) return;
+    setReviewItems(prev => prev.filter((_, i) => i !== index));
+  };
+
+  /**
+   * Increases the zoom level of the receipt preview by one step.
+   */
+  const handleZoomIn = () => {
+    setZoomLevel(prev => Math.min(prev + ZOOM_STEP, MAX_ZOOM));
+  };
+
+  /**
+   * Decreases the zoom level of the receipt preview by one step.
+   */
+  const handleZoomOut = () => {
+    setZoomLevel(prev => Math.max(prev - ZOOM_STEP, MIN_ZOOM));
+  };
+
+  /**
+   * Resets the zoom level back to 100%.
+   */
+  const handleZoomReset = () => {
+    setZoomLevel(100);
+  };
+
+  /**
+   * Saves the confirmed receipt data to the backend via PUT /receipts/:id.
    */
   const handleSaveConfirmed = async () => {
     setSaving(true);
@@ -211,16 +311,18 @@ function ReceiptUpload() {
 
     try {
       await api.put(`/receipts/${receiptId}`, {
-        storeName: reviewData.storeName,
-        purchaseDate: reviewData.purchaseDate,
-        productDescription: reviewData.productDescription,
-        price: parseFloat(reviewData.price) || 0,
-        warrantyMonths: parseInt(reviewData.warrantyMonths) || 12
+        storeName: reviewHeader.storeName,
+        purchaseDate: reviewHeader.purchaseDate,
+        totalPrice: parseFloat(reviewHeader.totalPrice) || 0,
+        warrantyMonths: parseInt(reviewHeader.warrantyMonths) || 12,
+        items: reviewItems.map(item => ({
+          productDescription: item.productDescription,
+          price: parseFloat(item.price) || 0,
+          warrantyMonths: parseInt(item.warrantyMonths) || 12
+        }))
       });
 
       setSaveSuccess(true);
-
-      // Redirect to receipts list after a short delay
       setTimeout(() => navigate('/receipts'), 1500);
 
     } catch (err) {
@@ -233,13 +335,15 @@ function ReceiptUpload() {
 
   /**
    * Resets the entire form back to the file selection step.
-   * Called when the user clicks "Upload Another".
    */
   const handleReset = () => {
     setSelectedFile(null);
     setPreviewUrl(null);
-    setReviewData(null);
+    setReviewHeader(null);
+    setReviewItems([]);
     setReceiptId(null);
+    setFileUrl(null);
+    setZoomLevel(100);
     setError('');
     setUploadProgress(0);
     setSaveSuccess(false);
@@ -247,158 +351,304 @@ function ReceiptUpload() {
   };
 
   // ============================================================
-  // STEP 2: Review Step - shown after successful OCR processing
+  // STEP 2: Split-screen review step
   // ============================================================
-  if (reviewData) {
+  if (reviewHeader) {
     return (
-      <Container className="mt-4">
-        <div className="row justify-content-center">
-          <div className="col-lg-8">
-            <Card>
+      <Container fluid className="px-4">
+
+        {/* Page header row */}
+        <div className="d-flex justify-content-between align-items-center mb-3">
+          <h4 className="mb-0">Review Extracted Information</h4>
+          <div className="d-flex gap-2">
+            <Button
+              variant="outline-secondary"
+              onClick={handleReset}
+              disabled={saving || saveSuccess}
+            >
+              ← Upload Different Receipt
+            </Button>
+            <Button
+              variant="success"
+              onClick={handleSaveConfirmed}
+              disabled={saving || saveSuccess || !reviewHeader.storeName}
+            >
+              {saving ? (
+                <>
+                  <Spinner as="span" animation="border" size="sm" className="me-2" />
+                  Saving...
+                </>
+              ) : (
+                'Confirm and Save Receipt'
+              )}
+            </Button>
+          </div>
+        </div>
+
+        {/* OCR quality notice */}
+        {ocrSuccess ? (
+          <Alert variant="info" className="mb-3">
+            <strong>OCR completed.</strong> The information on the left was automatically
+            extracted from your receipt. Use the receipt preview on the right to verify
+            and correct any errors before saving.
+          </Alert>
+        ) : (
+          <Alert variant="warning" className="mb-3">
+            <strong>OCR had difficulty reading this receipt.</strong> Please fill in
+            the fields manually using the receipt preview on the right as a guide.
+          </Alert>
+        )}
+
+        {error && (
+          <Alert variant="danger" onClose={() => setError('')} dismissible className="mb-3">
+            {error}
+          </Alert>
+        )}
+
+        {saveSuccess && (
+          <Alert variant="success" className="mb-3">
+            <strong>Receipt saved!</strong> Redirecting to your receipts...
+          </Alert>
+        )}
+
+        {/* Split-screen layout */}
+        <Row className="g-3" style={{ minHeight: '75vh' }}>
+
+          {/* ── LEFT PANEL: Edit form ──────────────────────────────────── */}
+          <Col md={6} lg={5}>
+            <Card className="h-100">
               <Card.Header className="bg-primary text-white">
-                <h4 className="mb-0">Review Extracted Information</h4>
+                <strong>Receipt Details</strong>
               </Card.Header>
-              <Card.Body>
+              <Card.Body style={{ overflowY: 'auto', maxHeight: 'calc(75vh - 56px)' }}>
 
-                {/* OCR quality notice */}
-                {ocrSuccess ? (
-                  <Alert variant="info" className="mb-4">
-                    <strong>OCR completed.</strong> The information below was automatically extracted
-                    from your receipt. Please review and correct any errors before saving —
-                    OCR is not always perfect, especially with handwritten or low-quality images.
-                  </Alert>
-                ) : (
-                  <Alert variant="warning" className="mb-4">
-                    <strong>OCR had difficulty reading this receipt.</strong> The fields below may be
-                    incomplete or inaccurate. Please fill them in manually before saving.
-                  </Alert>
-                )}
-
-                {error && (
-                  <Alert variant="danger" onClose={() => setError('')} dismissible>
-                    {error}
-                  </Alert>
-                )}
-
-                {saveSuccess && (
-                  <Alert variant="success">
-                    <strong>Receipt saved!</strong> Redirecting to your receipts...
-                  </Alert>
-                )}
-
-                {/* Review / edit form */}
-                <Row>
-                  <Col md={6}>
-                    <Form.Group className="mb-3">
-                      <Form.Label>
-                        Store Name <span className="text-danger">*</span>
-                      </Form.Label>
-                      <Form.Control
-                        type="text"
-                        value={reviewData.storeName}
-                        onChange={(e) => handleReviewChange('storeName', e.target.value)}
-                        placeholder="e.g. DID Electrical"
-                        disabled={saving || saveSuccess}
-                      />
-                    </Form.Group>
-                  </Col>
-                  <Col md={6}>
-                    <Form.Group className="mb-3">
-                      <Form.Label>
-                        Purchase Date <span className="text-danger">*</span>
-                      </Form.Label>
-                      <Form.Control
-                        type="date"
-                        value={reviewData.purchaseDate}
-                        onChange={(e) => handleReviewChange('purchaseDate', e.target.value)}
-                        disabled={saving || saveSuccess}
-                      />
-                    </Form.Group>
-                  </Col>
-                </Row>
-
+                {/* Header fields */}
                 <Form.Group className="mb-3">
-                  <Form.Label>
-                    Product Description <span className="text-danger">*</span>
-                  </Form.Label>
+                  <Form.Label>Store Name <span className="text-danger">*</span></Form.Label>
                   <Form.Control
                     type="text"
-                    value={reviewData.productDescription}
-                    onChange={(e) => handleReviewChange('productDescription', e.target.value)}
-                    placeholder="e.g. Samsung 55-inch Smart TV"
+                    value={reviewHeader.storeName}
+                    onChange={(e) => handleHeaderChange('storeName', e.target.value)}
+                    placeholder="e.g. DID Electrical"
                     disabled={saving || saveSuccess}
                   />
                 </Form.Group>
 
-                <Row>
+                <Row className="mb-3">
                   <Col md={6}>
-                    <Form.Group className="mb-3">
-                      <Form.Label>
-                        Price Paid (€) <span className="text-danger">*</span>
-                      </Form.Label>
+                    <Form.Group>
+                      <Form.Label>Purchase Date <span className="text-danger">*</span></Form.Label>
+                      <Form.Control
+                        type="date"
+                        value={reviewHeader.purchaseDate}
+                        onChange={(e) => handleHeaderChange('purchaseDate', e.target.value)}
+                        disabled={saving || saveSuccess}
+                      />
+                    </Form.Group>
+                  </Col>
+                  <Col md={6}>
+                    <Form.Group>
+                      <Form.Label>Total Price (€)</Form.Label>
                       <Form.Control
                         type="number"
                         step="0.01"
                         min="0"
-                        value={reviewData.price}
-                        onChange={(e) => handleReviewChange('price', e.target.value)}
+                        value={reviewHeader.totalPrice}
+                        onChange={(e) => handleHeaderChange('totalPrice', e.target.value)}
                         placeholder="0.00"
                         disabled={saving || saveSuccess}
                       />
                     </Form.Group>
                   </Col>
-                  <Col md={6}>
-                    <Form.Group className="mb-3">
-                      <Form.Label>Warranty Duration (months)</Form.Label>
-                      <Form.Control
-                        type="number"
-                        min="0"
-                        value={reviewData.warrantyMonths}
-                        onChange={(e) => handleReviewChange('warrantyMonths', e.target.value)}
-                        disabled={saving || saveSuccess}
-                      />
-                    </Form.Group>
-                  </Col>
                 </Row>
 
-                {/* Action buttons */}
-                <div className="d-flex justify-content-between mt-3">
+                <hr />
+
+                {/* Items section */}
+                <div className="d-flex justify-content-between align-items-center mb-3">
+                  <strong>Items ({reviewItems.length})</strong>
                   <Button
-                    variant="outline-secondary"
-                    onClick={handleReset}
+                    variant="outline-primary"
+                    size="sm"
+                    onClick={handleAddItem}
                     disabled={saving || saveSuccess}
                   >
-                    ← Upload Different Receipt
-                  </Button>
-                  <Button
-                    variant="success"
-                    onClick={handleSaveConfirmed}
-                    disabled={saving || saveSuccess || !reviewData.storeName || !reviewData.productDescription}
-                  >
-                    {saving ? (
-                      <>
-                        <Spinner as="span" animation="border" size="sm" className="me-2" />
-                        Saving...
-                      </>
-                    ) : (
-                      'Confirm and Save Receipt'
-                    )}
+                    + Add Item
                   </Button>
                 </div>
 
+                {reviewItems.map((item, index) => (
+                  <Card key={index} className="mb-3 bg-light border">
+                    <Card.Body className="py-2 px-3">
+                      <div className="d-flex justify-content-between align-items-center mb-2">
+                        <small><strong>Item {index + 1}</strong></small>
+                        {reviewItems.length > 1 && (
+                          <Button
+                            variant="outline-danger"
+                            size="sm"
+                            onClick={() => handleRemoveItem(index)}
+                            disabled={saving || saveSuccess}
+                          >
+                            Remove
+                          </Button>
+                        )}
+                      </div>
+
+                      <Form.Group className="mb-2">
+                        <Form.Label className="small mb-1">
+                          Description <span className="text-danger">*</span>
+                        </Form.Label>
+                        <Form.Control
+                          type="text"
+                          size="sm"
+                          value={item.productDescription}
+                          onChange={(e) => handleItemChange(index, 'productDescription', e.target.value)}
+                          placeholder="e.g. Nespresso Vertuo Pop"
+                          disabled={saving || saveSuccess}
+                        />
+                      </Form.Group>
+
+                      <Row>
+                        <Col xs={6}>
+                          <Form.Group>
+                            <Form.Label className="small mb-1">Price (€)</Form.Label>
+                            <Form.Control
+                              type="number"
+                              size="sm"
+                              step="0.01"
+                              min="0"
+                              value={item.price}
+                              onChange={(e) => handleItemChange(index, 'price', e.target.value)}
+                              placeholder="0.00"
+                              disabled={saving || saveSuccess}
+                            />
+                          </Form.Group>
+                        </Col>
+                        <Col xs={6}>
+                          <Form.Group>
+                            <Form.Label className="small mb-1">Warranty (months)</Form.Label>
+                            <Form.Control
+                              type="number"
+                              size="sm"
+                              min="0"
+                              max="120"
+                              value={item.warrantyMonths}
+                              onChange={(e) => handleItemChange(index, 'warrantyMonths', e.target.value)}
+                              disabled={saving || saveSuccess}
+                            />
+                          </Form.Group>
+                        </Col>
+                      </Row>
+                    </Card.Body>
+                  </Card>
+                ))}
+
               </Card.Body>
             </Card>
-          </div>
-        </div>
+          </Col>
+
+          {/* ── RIGHT PANEL: Receipt preview with zoom ─────────────────── */}
+          <Col md={6} lg={7}>
+            <Card className="h-100">
+              <Card.Header className="bg-secondary text-white d-flex justify-content-between align-items-center">
+                <strong>{isPdf ? 'Receipt PDF' : 'Receipt Image'}</strong>
+
+                {/* Zoom controls */}
+                <div className="d-flex align-items-center gap-2">
+                  <Button
+                    variant="outline-light"
+                    size="sm"
+                    onClick={handleZoomOut}
+                    disabled={zoomLevel <= MIN_ZOOM}
+                    title="Zoom out"
+                  >
+                    −
+                  </Button>
+                  <span className="text-white small" style={{ minWidth: '45px', textAlign: 'center' }}>
+                    {zoomLevel}%
+                  </span>
+                  <Button
+                    variant="outline-light"
+                    size="sm"
+                    onClick={handleZoomIn}
+                    disabled={zoomLevel >= MAX_ZOOM}
+                    title="Zoom in"
+                  >
+                    +
+                  </Button>
+                  <Button
+                    variant="outline-light"
+                    size="sm"
+                    onClick={handleZoomReset}
+                    title="Reset zoom"
+                  >
+                    ↺
+                  </Button>
+                </div>
+              </Card.Header>
+
+              {/* Scrollable preview area */}
+              <Card.Body
+                className="p-0"
+                style={{
+                  overflowY: 'auto',
+                  overflowX: 'auto',
+                  maxHeight: 'calc(75vh - 56px)',
+                  backgroundColor: '#f8f9fa'
+                }}
+              >
+                {fileUrl ? (
+                  <div
+                    style={{
+                      width: `${zoomLevel}%`,
+                      minWidth: zoomLevel > 100 ? `${zoomLevel}%` : '100%',
+                      transition: 'width 0.2s ease'
+                    }}
+                  >
+                    {isPdf ? (
+                      // PDFs: use embed with parameters to hide the browser's
+                      // built-in pages panel and toolbar for a cleaner view
+                      <embed
+                        src={`${fileUrl}#toolbar=0&navpanes=0&scrollbar=0`}
+                        type="application/pdf"
+                        width="100%"
+                        style={{
+                          height: `${Math.max(600, (zoomLevel / 100) * 800)}px`,
+                          display: 'block'
+                        }}
+                      />
+                    ) : (
+                      // Images: use img tag with blob URL
+                      <img
+                        src={fileUrl}
+                        alt="Receipt"
+                        style={{ width: '100%', display: 'block' }}
+                      />
+                    )}
+                  </div>
+                ) : (
+                  // Still loading the file blob
+                  <div className="d-flex flex-column align-items-center justify-content-center h-100 py-5">
+                    <Spinner animation="border" variant="secondary" />
+                    <p className="mt-3 text-muted">
+                      {isPdf ? 'Loading PDF preview...' : 'Loading image preview...'}
+                    </p>
+                  </div>
+                )}
+              </Card.Body>
+            </Card>
+          </Col>
+
+        </Row>
       </Container>
     );
   }
 
   // ============================================================
-  // STEP 1: Upload Step - file selection and upload
+  // STEP 1: Upload step - file selection
   // ============================================================
   return (
-    <Container className="mt-4">
+    <Container className="mt-0">
       <div className="row justify-content-center">
         <div className="col-lg-8">
           <Card>
@@ -413,7 +663,7 @@ function ReceiptUpload() {
                 </Alert>
               )}
 
-              <Form onSubmit={handleUploadSubmit}>
+              <Form noValidate onSubmit={handleUploadSubmit}>
 
                 {/* Drag and drop zone */}
                 <div
@@ -434,7 +684,6 @@ function ReceiptUpload() {
                   <p className="text-muted small mb-0">
                     Supported formats: PNG, JPEG, PDF (max {MAX_FILE_SIZE / 1024 / 1024}MB)
                   </p>
-
                   <Form.Control
                     ref={fileInputRef}
                     type="file"
@@ -485,12 +734,7 @@ function ReceiptUpload() {
                 {/* Upload progress bar */}
                 {uploading && (
                   <div className="mb-3">
-                    <ProgressBar
-                      now={uploadProgress}
-                      label={`${uploadProgress}%`}
-                      animated
-                      striped
-                    />
+                    <ProgressBar now={uploadProgress} label={`${uploadProgress}%`} animated striped />
                     <p className="text-center mt-2 text-muted">
                       <Spinner animation="border" size="sm" className="me-2" />
                       {uploadProgress < 90 ? 'Uploading...' : 'Running OCR, this may take a moment...'}
@@ -526,9 +770,9 @@ function ReceiptUpload() {
 
               <Alert variant="info" className="mt-3 mb-0">
                 <small>
-                  <strong>Note:</strong> After uploading, our OCR system will automatically extract
-                  purchase details from your receipt. You will be able to review and correct the
-                  information before it is saved.
+                  <strong>Note:</strong> After uploading, our OCR system will automatically
+                  extract purchase details from your receipt. You will be able to review the
+                  receipt and correct the information side by side before saving.
                 </small>
               </Alert>
 

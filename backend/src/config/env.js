@@ -1,7 +1,6 @@
 /**
  * Environment configuration loader.
  * Author: Arthur Kroth - x22166971
- * Date: 03/10/2026
  * WhereIsIt Project
  */
 

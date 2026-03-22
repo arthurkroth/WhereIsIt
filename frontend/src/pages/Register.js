@@ -1,7 +1,6 @@
 /**
  * File: Register.js
  * Author: Arthur Kroth - x22166971
- * Date: 11/02/2026
  * WhereIsIt Project
  */
 
@@ -12,32 +11,30 @@ import { register } from '../services/api';
 
 /**
  * Registration page component.
- * Allows new users to create an account.
- * 
+ * Allows new users to create an account with their name, email, and password.
+ *
  * SECURITY NOTES:
  * - Password requirements enforced (min 10 characters)
  * - Password confirmation to prevent typos
  * - Passwords never logged or displayed
  * - Client-side validation before API call
  * - Generic error messages to prevent information leakage
+ * - All new accounts are FREE - PREMIUM requires payment (future feature)
  */
 const Register = () => {
   const navigate = useNavigate();
 
-  // Form state
+  const [firstName, setFirstName] = useState('');
+  const [lastName, setLastName] = useState('');
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
-  const [plan, setPlan] = useState('FREE');
-
-  // UI state
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
-  const [validated, setValidated] = useState(false);
 
   /**
-   * Validates email format.
+   * Validates email format using a basic regex.
    * @param {string} email - Email to validate
    * @returns {boolean} True if valid
    */
@@ -47,43 +44,28 @@ const Register = () => {
   };
 
   /**
-   * Validates password strength.
-   * Current requirement: minimum 10 characters
-   * Can be extended with additional complexity requirements.
+   * Validates password strength (minimum 10 characters).
    * @param {string} password - Password to validate
-   * @returns {Object} Validation result
+   * @returns {Object} Validation result with valid flag and errors array
    */
   const validatePassword = (password) => {
     const errors = [];
-
     if (password.length < 10) {
       errors.push('Password must be at least 10 characters long');
     }
-
-    // Optional: Add more complexity requirements
-    // if (!/[A-Z]/.test(password)) {
-    //   errors.push('Password must contain at least one uppercase letter');
-    // }
-    // if (!/[0-9]/.test(password)) {
-    //   errors.push('Password must contain at least one number');
-    // }
-
-    return {
-      valid: errors.length === 0,
-      errors,
-    };
+    return { valid: errors.length === 0, errors };
   };
 
   /**
    * Handles registration form submission.
+   * All validation is manual - errors shown in the Alert, not inline.
+   * This prevents Bootstrap's red feedback messages appearing on page load.
    */
   const handleRegister = async (e) => {
     e.preventDefault();
-    setValidated(true);
     setError('');
 
-    // Client-side validation
-    if (!email || !password || !confirmPassword) {
+    if (!firstName || !lastName || !email || !password || !confirmPassword) {
       setError('Please fill in all fields');
       return;
     }
@@ -107,17 +89,10 @@ const Register = () => {
     setLoading(true);
 
     try {
-      await register(email, password, plan);
-      
-      // Registration successful
+      await register(email, password, 'FREE', firstName, lastName);
       setSuccess(true);
-      
-      // Redirect to login after 2 seconds
-      setTimeout(() => {
-        navigate('/login');
-      }, 2000);
+      setTimeout(() => navigate('/login'), 2000);
     } catch (err) {
-      // Handle specific errors
       if (err.response?.status === 400) {
         setError('Invalid registration data. Please check your inputs.');
       } else if (err.response?.status === 409) {
@@ -151,7 +126,36 @@ const Register = () => {
                 </Alert>
               )}
 
-              <Form noValidate validated={validated} onSubmit={handleRegister}>
+              {/* noValidate disables browser validation - all validation is handled manually above */}
+              <Form noValidate onSubmit={handleRegister}>
+
+                <Row>
+                  <Col md={6}>
+                    <Form.Group className="mb-3" controlId="formFirstName">
+                      <Form.Label>First Name</Form.Label>
+                      <Form.Control
+                        type="text"
+                        placeholder="First name"
+                        value={firstName}
+                        onChange={(e) => setFirstName(e.target.value)}
+                        disabled={loading || success}
+                      />
+                    </Form.Group>
+                  </Col>
+                  <Col md={6}>
+                    <Form.Group className="mb-3" controlId="formLastName">
+                      <Form.Label>Last Name</Form.Label>
+                      <Form.Control
+                        type="text"
+                        placeholder="Last name"
+                        value={lastName}
+                        onChange={(e) => setLastName(e.target.value)}
+                        disabled={loading || success}
+                      />
+                    </Form.Group>
+                  </Col>
+                </Row>
+
                 <Form.Group className="mb-3" controlId="formEmail">
                   <Form.Label>Email address</Form.Label>
                   <Form.Control
@@ -159,15 +163,11 @@ const Register = () => {
                     placeholder="Enter email"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    required
                     disabled={loading || success}
                   />
                   <Form.Text className="text-muted">
                     We'll never share your email with anyone else.
                   </Form.Text>
-                  <Form.Control.Feedback type="invalid">
-                    Please provide a valid email.
-                  </Form.Control.Feedback>
                 </Form.Group>
 
                 <Form.Group className="mb-3" controlId="formPassword">
@@ -177,16 +177,11 @@ const Register = () => {
                     placeholder="Password"
                     value={password}
                     onChange={(e) => setPassword(e.target.value)}
-                    required
-                    minLength={10}
                     disabled={loading || success}
                   />
                   <Form.Text className="text-muted">
                     Must be at least 10 characters long.
                   </Form.Text>
-                  <Form.Control.Feedback type="invalid">
-                    Password must be at least 10 characters.
-                  </Form.Control.Feedback>
                 </Form.Group>
 
                 <Form.Group className="mb-3" controlId="formConfirmPassword">
@@ -196,27 +191,8 @@ const Register = () => {
                     placeholder="Confirm password"
                     value={confirmPassword}
                     onChange={(e) => setConfirmPassword(e.target.value)}
-                    required
                     disabled={loading || success}
                   />
-                  <Form.Control.Feedback type="invalid">
-                    Please confirm your password.
-                  </Form.Control.Feedback>
-                </Form.Group>
-
-                <Form.Group className="mb-3" controlId="formPlan">
-                  <Form.Label>Account Plan</Form.Label>
-                  <Form.Select
-                    value={plan}
-                    onChange={(e) => setPlan(e.target.value)}
-                    disabled={loading || success}
-                  >
-                    <option value="FREE">Free</option>
-                    <option value="PREMIUM">Premium</option>
-                  </Form.Select>
-                  <Form.Text className="text-muted">
-                    You can upgrade later if needed.
-                  </Form.Text>
                 </Form.Group>
 
                 <Button
@@ -227,14 +203,7 @@ const Register = () => {
                 >
                   {loading ? (
                     <>
-                      <Spinner
-                        as="span"
-                        animation="border"
-                        size="sm"
-                        role="status"
-                        aria-hidden="true"
-                        className="me-2"
-                      />
+                      <Spinner as="span" animation="border" size="sm" role="status" aria-hidden="true" className="me-2" />
                       Registering...
                     </>
                   ) : (

@@ -1,7 +1,6 @@
 /**
  * File: ReceiptDetail.js
  * Author: Arthur Kroth - x22166971
- * Date: 17/03/2026
  * WhereIsIt Project
  */
 
@@ -9,27 +8,34 @@ import React, { useState, useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   Container, Card, Row, Col, Badge, Button,
-  Alert, Spinner, Form, Modal
+  Alert, Spinner, Form, Modal, Table
 } from 'react-bootstrap';
 import { getReceiptById, getReceiptFileUrl } from '../services/api';
 import api from '../services/api';
 
 /**
  * ReceiptDetail Page
- * Shows full details of a single receipt and allows editing.
- * Also displays the original uploaded receipt image or PDF.
+ * Shows full details of a single receipt including all its line items.
+ * Allows the user to edit or delete the receipt.
  *
  * FEATURES:
- * - View all receipt details
- * - View original uploaded image (via blob URL) or PDF (via embed + blob URL)
- * - Edit receipt fields inline
- * - Delete receipt with confirmation
- * - Warranty status display
+ * - View all receipt header details (store, date, total, warranty)
+ * - View all line items in a table with individual prices and warranties
+ * - Edit receipt header and items inline
+ * - Total price auto-recalculates when items are added, removed, or changed
+ * - Add/remove items during editing
+ * - View original uploaded image or PDF
+ * - Delete receipt with confirmation modal
+ *
+ * DATE FORMAT NOTE:
+ * MySQL returns dates as full ISO timestamps e.g. "2025-02-16T00:00:00.000Z".
+ * The HTML <input type="date"> requires "YYYY-MM-DD" format only.
+ * We always convert using toISOString().split('T')[0] when populating the
+ * edit form, otherwise the date input renders blank and saving fails.
  *
  * SECURITY:
  * - Only the owner can view/edit/delete (enforced by backend)
- * - File served securely through authenticated endpoint
- * - Both images and PDFs are fetched via blob URLs to avoid cross-origin issues
+ * - File served securely through authenticated endpoint using blob URL
  */
 function ReceiptDetail() {
   const { id } = useParams();
@@ -43,37 +49,54 @@ function ReceiptDetail() {
   const [showDeleteModal, setShowDeleteModal] = useState(false);
   const [deleting, setDeleting] = useState(false);
 
-  // Holds the blob URL for the receipt file (works for both images and PDFs).
-  // We use a blob URL to avoid cross-origin/CSP issues with the backend on a different port.
+  // Blob URL for the receipt file (avoids CSP cross-origin issues)
   const [fileUrl, setFileUrl] = useState(null);
 
-  // Edit form state - populated when user clicks Edit
-  const [editForm, setEditForm] = useState({
+  // Edit form state - header fields
+  const [editHeader, setEditHeader] = useState({
     storeName: '',
     purchaseDate: '',
-    productDescription: '',
-    price: '',
+    totalPrice: '',
     warrantyMonths: ''
   });
 
+  // Edit form state - items array
+  const [editItems, setEditItems] = useState([]);
+
   /**
-   * Fetches receipt details when the page loads or ID changes.
+   * Fetches receipt details when the page loads or the ID changes.
    */
   useEffect(() => {
     fetchReceipt();
   }, [id]);
 
   /**
-   * Fetches the receipt file as a blob using the auth token.
-   * Works for both images and PDFs.
+   * Auto-recalculates the total price whenever the items list changes.
+   * This ensures the total is always the sum of all item prices, so the user
+   * never has to manually update the total when adding or removing items.
    *
-   * We use a blob URL (URL.createObjectURL) instead of a direct URL because:
-   * - The backend runs on port 3001 and the frontend on port 3000
-   * - The browser blocks direct cross-origin requests in <img> and <embed> tags
-   * - Fetching via fetch() with an Authorization header bypasses this restriction
+   * We only do this when editing is active, to avoid overwriting the
+   * loaded total price on initial page load.
    */
   useEffect(() => {
-    // Only run if receipt has an attached file
+    if (!editing) return;
+
+    const calculatedTotal = editItems.reduce((sum, item) => {
+      const price = parseFloat(item.price);
+      return sum + (isNaN(price) ? 0 : price);
+    }, 0);
+
+    setEditHeader(prev => ({
+      ...prev,
+      totalPrice: calculatedTotal.toFixed(2)
+    }));
+  }, [editItems, editing]);
+
+  /**
+   * Fetches the receipt file as a blob URL using the auth token.
+   * Works for both images and PDFs.
+   */
+  useEffect(() => {
     if (!receipt?.hasFile) return;
 
     const fetchFile = async () => {
@@ -83,11 +106,8 @@ function ReceiptDetail() {
           `http://localhost:3001/receipts/${receipt.id}/file`,
           { headers: { Authorization: `Bearer ${token}` } }
         );
-
         if (!response.ok) return;
 
-        // Convert the response to a blob and create a local object URL
-        // This URL is safe to use in both <img src> and <embed src>
         const blob = await response.blob();
         const url = URL.createObjectURL(blob);
         setFileUrl(url);
@@ -98,7 +118,6 @@ function ReceiptDetail() {
 
     fetchFile();
 
-    // Cleanup: revoke the blob URL when the component unmounts to free memory
     return () => {
       if (fileUrl) URL.revokeObjectURL(fileUrl);
     };
@@ -106,22 +125,41 @@ function ReceiptDetail() {
 
   /**
    * Fetches a single receipt by ID from the backend.
+   * Populates both the display state and the edit form state.
+   *
+   * IMPORTANT: MySQL may return the purchase_date as a full ISO timestamp
+   * (e.g. "2025-02-16T00:00:00.000Z"). The HTML date input only accepts
+   * "YYYY-MM-DD", so we always strip the time portion when setting editHeader.
    */
   const fetchReceipt = async () => {
     setLoading(true);
     setError('');
     try {
       const response = await getReceiptById(id);
-      setReceipt(response.data.receipt);
+      const data = response.data.receipt;
+      setReceipt(data);
 
-      // Pre-populate the edit form with current values
-      setEditForm({
-        storeName: response.data.receipt.storeName,
-        purchaseDate: response.data.receipt.purchaseDate,
-        productDescription: response.data.receipt.productDescription,
-        price: response.data.receipt.price,
-        warrantyMonths: response.data.receipt.warrantyMonths
+      // Convert the date to YYYY-MM-DD for the HTML date input
+      const formattedDate = data.purchaseDate
+        ? new Date(data.purchaseDate).toISOString().split('T')[0]
+        : '';
+
+      setEditHeader({
+        storeName: data.storeName || '',
+        purchaseDate: formattedDate,
+        totalPrice: data.totalPrice || '',
+        warrantyMonths: data.warrantyMonths || 12
       });
+
+      setEditItems(
+        data.items?.length > 0
+          ? data.items.map(item => ({
+              productDescription: item.productDescription,
+              price: item.price,
+              warrantyMonths: item.warrantyMonths
+            }))
+          : [{ productDescription: '', price: '', warrantyMonths: 12 }]
+      );
     } catch (err) {
       setError('Failed to load receipt details');
       console.error('Fetch receipt error:', err);
@@ -131,12 +169,51 @@ function ReceiptDetail() {
   };
 
   /**
-   * Handles changes to the edit form fields.
-   * @param {string} field - Field name to update
+   * Handles changes to the edit header fields.
+   * Note: totalPrice can still be manually overridden here if needed,
+   * but it will be recalculated automatically when items change.
+   * @param {string} field - Field name
    * @param {string} value - New value
    */
-  const handleEditChange = (field, value) => {
-    setEditForm((prev) => ({ ...prev, [field]: value }));
+  const handleHeaderChange = (field, value) => {
+    setEditHeader(prev => ({ ...prev, [field]: value }));
+  };
+
+  /**
+   * Handles changes to a specific item in the edit items list.
+   * Triggers the auto-total recalculation via the useEffect above.
+   * @param {number} index - Item index
+   * @param {string} field - Field name
+   * @param {string} value - New value
+   */
+  const handleItemChange = (index, field, value) => {
+    setEditItems(prev => {
+      const updated = [...prev];
+      updated[index] = { ...updated[index], [field]: value };
+      return updated;
+    });
+  };
+
+  /**
+   * Adds a new blank item row to the edit items list.
+   * The total will automatically recalculate via the useEffect.
+   */
+  const handleAddItem = () => {
+    setEditItems(prev => [
+      ...prev,
+      { productDescription: '', price: '', warrantyMonths: 12 }
+    ]);
+  };
+
+  /**
+   * Removes an item from the edit items list.
+   * Always keeps at least one item row.
+   * The total will automatically recalculate via the useEffect.
+   * @param {number} index - Index of the item to remove
+   */
+  const handleRemoveItem = (index) => {
+    if (editItems.length === 1) return;
+    setEditItems(prev => prev.filter((_, i) => i !== index));
   };
 
   /**
@@ -147,14 +224,18 @@ function ReceiptDetail() {
     setError('');
     try {
       await api.put(`/receipts/${id}`, {
-        storeName: editForm.storeName,
-        purchaseDate: editForm.purchaseDate,
-        productDescription: editForm.productDescription,
-        price: parseFloat(editForm.price),
-        warrantyMonths: parseInt(editForm.warrantyMonths)
+        storeName: editHeader.storeName,
+        purchaseDate: editHeader.purchaseDate,
+        totalPrice: parseFloat(editHeader.totalPrice) || 0,
+        warrantyMonths: parseInt(editHeader.warrantyMonths) || 12,
+        items: editItems.map(item => ({
+          productDescription: item.productDescription,
+          price: parseFloat(item.price) || 0,
+          warrantyMonths: parseInt(item.warrantyMonths) || 12
+        }))
       });
 
-      // Refresh the receipt data after saving
+      // Refresh the displayed data after saving
       await fetchReceipt();
       setEditing(false);
     } catch (err) {
@@ -197,21 +278,19 @@ function ReceiptDetail() {
 
   /**
    * Formats a date string for human-readable display.
-   * @param {string} dateString - Date in YYYY-MM-DD format
-   * @returns {string} Human-readable date e.g. "20 December 2025"
+   * Handles both "YYYY-MM-DD" and full ISO timestamp formats.
+   * @param {string} dateString - Date to format
+   * @returns {string} Human-readable date
    */
   const formatDate = (dateString) => {
     if (!dateString) return 'N/A';
     const date = new Date(dateString);
     if (isNaN(date.getTime())) return 'N/A';
-    return date.toLocaleDateString('en-GB', {
-      year: 'numeric', month: 'long', day: 'numeric'
-    });
+    return date.toLocaleDateString('en-GB', { year: 'numeric', month: 'long', day: 'numeric' });
   };
 
   /**
    * Checks if the attached file is a PDF based on its filename extension.
-   * Used to decide whether to render an <embed> tag (PDF) or <img> tag (image).
    * @returns {boolean} True if the file is a PDF
    */
   const isPdf = () => {
@@ -221,17 +300,17 @@ function ReceiptDetail() {
   // Show spinner while loading
   if (loading) {
     return (
-      <Container className="mt-4 text-center">
+      <Container className="mt-0 text-center">
         <Spinner animation="border" variant="primary" />
         <p className="mt-3">Loading receipt...</p>
       </Container>
     );
   }
 
-  // Show error if fetch failed and we have no receipt to show
+  // Show error if the fetch failed and we have nothing to display
   if (error && !receipt) {
     return (
-      <Container className="mt-4">
+      <Container className="mt-0">
         <Alert variant="danger">{error}</Alert>
         <Button variant="secondary" onClick={() => navigate('/receipts')}>
           Back to Receipts
@@ -241,8 +320,9 @@ function ReceiptDetail() {
   }
 
   return (
-    <Container className="mt-4">
-      {/* Header with Back button and Edit/Delete actions */}
+    <Container className="mt-0">
+
+      {/* Header with back button and action buttons */}
       <div className="d-flex justify-content-between align-items-center mb-4">
         <div>
           <Button
@@ -269,12 +349,16 @@ function ReceiptDetail() {
           {editing && (
             <>
               <Button variant="success" className="me-2" onClick={handleSave} disabled={saving}>
-                {saving ? <Spinner as="span" animation="border" size="sm" className="me-1" /> : null}
+                {saving
+                  ? <Spinner as="span" animation="border" size="sm" className="me-1" />
+                  : null
+                }
                 Save Changes
               </Button>
               <Button
                 variant="outline-secondary"
                 onClick={() => { setEditing(false); fetchReceipt(); }}
+                disabled={saving}
               >
                 Cancel
               </Button>
@@ -292,6 +376,8 @@ function ReceiptDetail() {
       <Row>
         {/* Left column: receipt details */}
         <Col md={receipt?.hasFile ? 7 : 12}>
+
+          {/* Receipt header card */}
           <Card className="mb-4">
             <Card.Header className="bg-primary text-white d-flex justify-content-between align-items-center">
               <strong>Purchase Information</strong>
@@ -301,60 +387,53 @@ function ReceiptDetail() {
             </Card.Header>
             <Card.Body>
               {editing ? (
-                // Edit mode - show editable form fields
+                // Edit mode: show editable header fields
                 <>
                   <Form.Group className="mb-3">
                     <Form.Label>Store Name</Form.Label>
                     <Form.Control
                       type="text"
-                      value={editForm.storeName}
-                      onChange={(e) => handleEditChange('storeName', e.target.value)}
+                      value={editHeader.storeName}
+                      onChange={(e) => handleHeaderChange('storeName', e.target.value)}
                     />
                   </Form.Group>
                   <Form.Group className="mb-3">
                     <Form.Label>Purchase Date</Form.Label>
                     <Form.Control
                       type="date"
-                      value={editForm.purchaseDate}
-                      onChange={(e) => handleEditChange('purchaseDate', e.target.value)}
-                    />
-                  </Form.Group>
-                  <Form.Group className="mb-3">
-                    <Form.Label>Product Description</Form.Label>
-                    <Form.Control
-                      type="text"
-                      value={editForm.productDescription}
-                      onChange={(e) => handleEditChange('productDescription', e.target.value)}
+                      value={editHeader.purchaseDate}
+                      onChange={(e) => handleHeaderChange('purchaseDate', e.target.value)}
                     />
                   </Form.Group>
                   <Row>
                     <Col md={6}>
                       <Form.Group className="mb-3">
-                        <Form.Label>Price (€)</Form.Label>
+                        {/* Total price is auto-calculated from items but can still be manually overridden */}
+                        <Form.Label>Total Price (€) <small className="text-muted fw-normal">— auto-calculated</small></Form.Label>
                         <Form.Control
                           type="number"
                           step="0.01"
                           min="0"
-                          value={editForm.price}
-                          onChange={(e) => handleEditChange('price', e.target.value)}
+                          value={editHeader.totalPrice}
+                          onChange={(e) => handleHeaderChange('totalPrice', e.target.value)}
                         />
                       </Form.Group>
                     </Col>
                     <Col md={6}>
                       <Form.Group className="mb-3">
-                        <Form.Label>Warranty (months)</Form.Label>
+                        <Form.Label>Receipt Warranty (months)</Form.Label>
                         <Form.Control
                           type="number"
                           min="0"
-                          value={editForm.warrantyMonths}
-                          onChange={(e) => handleEditChange('warrantyMonths', e.target.value)}
+                          value={editHeader.warrantyMonths}
+                          onChange={(e) => handleHeaderChange('warrantyMonths', e.target.value)}
                         />
                       </Form.Group>
                     </Col>
                   </Row>
                 </>
               ) : (
-                // View mode - display receipt data as read-only
+                // View mode: display receipt header as read-only
                 <Row>
                   <Col md={6} className="mb-3">
                     <small className="text-muted">Store</small>
@@ -364,17 +443,9 @@ function ReceiptDetail() {
                     <small className="text-muted">Purchase Date</small>
                     <div><strong>{formatDate(receipt?.purchaseDate)}</strong></div>
                   </Col>
-                  <Col md={12} className="mb-3">
-                    <small className="text-muted">Product Description</small>
-                    <div><strong>{receipt?.productDescription}</strong></div>
-                  </Col>
                   <Col md={6} className="mb-3">
-                    <small className="text-muted">Price Paid</small>
-                    <div><strong>€{parseFloat(receipt?.price || 0).toFixed(2)}</strong></div>
-                  </Col>
-                  <Col md={6} className="mb-3">
-                    <small className="text-muted">Warranty Duration</small>
-                    <div><strong>{receipt?.warrantyMonths} months</strong></div>
+                    <small className="text-muted">Total Price</small>
+                    <div><strong>€{parseFloat(receipt?.totalPrice || 0).toFixed(2)}</strong></div>
                   </Col>
                   <Col md={6} className="mb-3">
                     <small className="text-muted">Warranty Expires</small>
@@ -384,33 +455,134 @@ function ReceiptDetail() {
                     <small className="text-muted">Uploaded On</small>
                     <div><strong>{formatDate(receipt?.createdAt)}</strong></div>
                   </Col>
+                  <Col md={6} className="mb-3">
+                    <small className="text-muted">Items</small>
+                    <div><strong>{receipt?.itemCount || 0} item(s)</strong></div>
+                  </Col>
                 </Row>
               )}
             </Card.Body>
           </Card>
+
+          {/* Items card */}
+          <Card className="mb-4">
+            <Card.Header className="d-flex justify-content-between align-items-center">
+              <strong>Line Items</strong>
+              {editing && (
+                <Button variant="outline-primary" size="sm" onClick={handleAddItem}>
+                  + Add Item
+                </Button>
+              )}
+            </Card.Header>
+            <Card.Body className={editing ? '' : 'p-0'}>
+              {editing ? (
+                // Edit mode: editable item cards
+                editItems.map((item, index) => (
+                  <Card key={index} className="mb-3 bg-light">
+                    <Card.Body>
+                      <div className="d-flex justify-content-between align-items-center mb-2">
+                        <strong>Item {index + 1}</strong>
+                        {editItems.length > 1 && (
+                          <Button
+                            variant="outline-danger"
+                            size="sm"
+                            onClick={() => handleRemoveItem(index)}
+                          >
+                            Remove
+                          </Button>
+                        )}
+                      </div>
+                      <Form.Group className="mb-3">
+                        <Form.Label>Product Description</Form.Label>
+                        <Form.Control
+                          type="text"
+                          value={item.productDescription}
+                          onChange={(e) => handleItemChange(index, 'productDescription', e.target.value)}
+                        />
+                      </Form.Group>
+                      <Row>
+                        <Col md={6}>
+                          <Form.Group className="mb-2">
+                            <Form.Label>Price (€)</Form.Label>
+                            <Form.Control
+                              type="number"
+                              step="0.01"
+                              min="0"
+                              value={item.price}
+                              onChange={(e) => handleItemChange(index, 'price', e.target.value)}
+                            />
+                          </Form.Group>
+                        </Col>
+                        <Col md={6}>
+                          <Form.Group className="mb-2">
+                            <Form.Label>Warranty (months)</Form.Label>
+                            <Form.Control
+                              type="number"
+                              min="0"
+                              max="120"
+                              value={item.warrantyMonths}
+                              onChange={(e) => handleItemChange(index, 'warrantyMonths', e.target.value)}
+                            />
+                          </Form.Group>
+                        </Col>
+                      </Row>
+                    </Card.Body>
+                  </Card>
+                ))
+              ) : (
+                // View mode: items in a read-only table
+                <div className="table-responsive">
+                  <Table className="mb-0">
+                    <thead className="table-light">
+                      <tr>
+                        <th>Product</th>
+                        <th>Price</th>
+                        <th>Warranty</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {receipt?.items?.length > 0 ? (
+                        receipt.items.map((item, index) => (
+                          <tr key={index}>
+                            <td>{item.productDescription}</td>
+                            <td>€{parseFloat(item.price || 0).toFixed(2)}</td>
+                            <td>{item.warrantyMonths} months</td>
+                          </tr>
+                        ))
+                      ) : (
+                        <tr>
+                          <td colSpan="3" className="text-center text-muted">No items found</td>
+                        </tr>
+                      )}
+                    </tbody>
+                  </Table>
+                </div>
+              )}
+            </Card.Body>
+          </Card>
+
         </Col>
 
-        {/* Right column: receipt file preview (image or PDF) */}
+        {/* Right column: receipt file preview */}
         {receipt?.hasFile && (
           <Col md={5}>
             <Card>
               <Card.Header className="bg-secondary text-white">
-                {/* Show different label depending on file type */}
                 <strong>{isPdf() ? 'Receipt PDF' : 'Receipt Image'}</strong>
               </Card.Header>
               <Card.Body className="text-center">
                 {fileUrl ? (
                   isPdf() ? (
-                    // PDFs use <embed> with the blob URL - avoids cross-origin issues
+                    // PDFs: embed with parameters to hide browser PDF UI panels
                     <embed
-                      src={fileUrl}
+                      src={`${fileUrl}#toolbar=0&navpanes=0&scrollbar=0`}
                       type="application/pdf"
                       width="100%"
                       height="500px"
                       style={{ borderRadius: '4px' }}
                     />
                   ) : (
-                    // Images use <img> with the blob URL
+                    // Images: img tag with blob URL
                     <img
                       src={fileUrl}
                       alt="Receipt"
@@ -419,7 +591,6 @@ function ReceiptDetail() {
                     />
                   )
                 ) : (
-                  // Show spinner while the blob URL is being fetched
                   <div className="py-4">
                     <Spinner animation="border" variant="secondary" />
                     <p className="mt-2 text-muted">
@@ -449,8 +620,8 @@ function ReceiptDetail() {
           <Modal.Title>Confirm Delete</Modal.Title>
         </Modal.Header>
         <Modal.Body>
-          Are you sure you want to delete this receipt? This action cannot be undone
-          and the file will also be permanently deleted.
+          Are you sure you want to delete this receipt and all its items? This action
+          cannot be undone and the file will also be permanently deleted.
         </Modal.Body>
         <Modal.Footer>
           <Button
@@ -461,11 +632,15 @@ function ReceiptDetail() {
             Cancel
           </Button>
           <Button variant="danger" onClick={handleDelete} disabled={deleting}>
-            {deleting ? <Spinner as="span" animation="border" size="sm" className="me-1" /> : null}
+            {deleting
+              ? <Spinner as="span" animation="border" size="sm" className="me-1" />
+              : null
+            }
             Delete Receipt
           </Button>
         </Modal.Footer>
       </Modal>
+
     </Container>
   );
 }

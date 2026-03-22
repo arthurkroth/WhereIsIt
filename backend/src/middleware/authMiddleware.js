@@ -1,7 +1,6 @@
 /**
  * Authentication and Role-Based Access Control (RBAC) middleware.
  * Author: Arthur Kroth - x22166971
- * Date: 03/10/2026
  * WhereIsIt Project
  */
 

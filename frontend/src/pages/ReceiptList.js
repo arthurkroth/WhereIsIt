@@ -1,26 +1,29 @@
 /**
  * File: ReceiptList.js
  * Author: Arthur Kroth - x22166971
- * Date: 11/02/2026
  * WhereIsIt Project
  */
 
 import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Container, Card, Table, Badge, Button, Alert, Spinner, InputGroup, Form } from 'react-bootstrap';
+import {
+  Container, Card, Table, Badge, Button,
+  Alert, Spinner, InputGroup, Form
+} from 'react-bootstrap';
 import { listReceipts } from '../services/api';
 
 /**
  * ReceiptList Page
  * Displays all receipts for the authenticated user.
  * Shows warranty status and allows filtering/searching.
- * 
+ *
  * FEATURES:
  * - Lists all receipts with decrypted data
+ * - Shows item count per receipt and the first item as a summary
  * - Shows warranty expiry status (active, expiring soon, expired)
  * - Search/filter functionality
- * - Responsive table design
- * 
+ * - Clicking a row navigates to the full receipt detail page
+ *
  * SECURITY:
  * - Data is decrypted server-side before transmission
  * - Only shows receipts owned by authenticated user (enforced by backend)
@@ -37,7 +40,7 @@ function ReceiptList() {
   const [filterStatus, setFilterStatus] = useState('all');
 
   /**
-   * Fetches receipts from backend when component mounts.
+   * Fetches receipts from the backend when the component mounts.
    */
   useEffect(() => {
     fetchReceipts();
@@ -49,7 +52,6 @@ function ReceiptList() {
   const fetchReceipts = async () => {
     setLoading(true);
     setError('');
-
     try {
       const response = await listReceipts();
       setReceipts(response.data.receipts || []);
@@ -61,25 +63,23 @@ function ReceiptList() {
   };
 
   /**
-   * Applies search and filter whenever receipts, searchTerm, or filterStatus change.
+   * Applies search and filter whenever receipts, searchTerm, or filterStatus changes.
    */
   useEffect(() => {
     let filtered = [...receipts];
 
-    // Apply search filter across store name and product description
+    // Apply search filter across store name and first item description
     if (searchTerm) {
       const term = searchTerm.toLowerCase();
-      filtered = filtered.filter(
-        (receipt) =>
-          receipt.storeName.toLowerCase().includes(term) ||
-          receipt.productDescription.toLowerCase().includes(term)
+      filtered = filtered.filter(receipt =>
+        receipt.storeName.toLowerCase().includes(term) ||
+        receipt.firstItemDescription?.toLowerCase().includes(term)
       );
     }
 
-    // Apply warranty status filter
-    // Uses receipt.warrantyExpiry (correct field name from backend)
+    // Apply warranty status filter using the warrantyExpiry field
     if (filterStatus !== 'all') {
-      filtered = filtered.filter((receipt) => {
+      filtered = filtered.filter(receipt => {
         const status = getWarrantyStatus(receipt.warrantyExpiry);
         return status.toLowerCase() === filterStatus;
       });
@@ -98,13 +98,9 @@ function ReceiptList() {
     const expiry = new Date(expiryDate);
     const daysUntilExpiry = Math.ceil((expiry - today) / (1000 * 60 * 60 * 24));
 
-    if (daysUntilExpiry < 0) {
-      return 'Expired';
-    } else if (daysUntilExpiry <= 30) {
-      return 'Expiring Soon';
-    } else {
-      return 'Active';
-    }
+    if (daysUntilExpiry < 0) return 'Expired';
+    if (daysUntilExpiry <= 30) return 'Expiring Soon';
+    return 'Active';
   };
 
   /**
@@ -114,10 +110,10 @@ function ReceiptList() {
    */
   const getStatusBadgeVariant = (status) => {
     switch (status) {
-      case 'Active':       return 'success';
+      case 'Active':        return 'success';
       case 'Expiring Soon': return 'warning';
-      case 'Expired':      return 'danger';
-      default:             return 'secondary';
+      case 'Expired':       return 'danger';
+      default:              return 'secondary';
     }
   };
 
@@ -158,14 +154,12 @@ function ReceiptList() {
             className="me-2"
             onClick={() => navigate('/receipt/upload')}
           >
-            <i className="bi bi-upload me-2"></i>
             Upload Receipt
           </Button>
           <Button
             variant="outline-primary"
             onClick={() => navigate('/receipt/manual')}
           >
-            <i className="bi bi-plus-circle me-2"></i>
             Add Manually
           </Button>
         </div>
@@ -183,9 +177,6 @@ function ReceiptList() {
           <div className="row g-3">
             <div className="col-md-8">
               <InputGroup>
-                <InputGroup.Text>
-                  <i className="bi bi-search"></i>
-                </InputGroup.Text>
                 <Form.Control
                   type="text"
                   placeholder="Search by store or product..."
@@ -193,10 +184,7 @@ function ReceiptList() {
                   onChange={(e) => setSearchTerm(e.target.value)}
                 />
                 {searchTerm && (
-                  <Button
-                    variant="outline-secondary"
-                    onClick={() => setSearchTerm('')}
-                  >
+                  <Button variant="outline-secondary" onClick={() => setSearchTerm('')}>
                     Clear
                   </Button>
                 )}
@@ -225,7 +213,6 @@ function ReceiptList() {
       ) : filteredReceipts.length === 0 ? (
         <Card>
           <Card.Body className="text-center py-5">
-            <i className="bi bi-receipt display-1 text-muted"></i>
             <h4 className="mt-3">
               {receipts.length === 0 ? 'No receipts yet' : 'No matching receipts'}
             </h4>
@@ -261,16 +248,15 @@ function ReceiptList() {
                 <thead className="table-light">
                   <tr>
                     <th>Store</th>
-                    <th>Product</th>
+                    <th>Items</th>
                     <th>Purchase Date</th>
-                    <th>Price</th>
+                    <th>Total</th>
                     <th>Warranty</th>
                     <th>Status</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filteredReceipts.map((receipt) => {
-                    // Use warrantyExpiry (correct backend field name)
                     const status = getWarrantyStatus(receipt.warrantyExpiry);
                     return (
                       <tr
@@ -281,13 +267,20 @@ function ReceiptList() {
                         <td>
                           <strong>{receipt.storeName}</strong>
                         </td>
-                        <td>{receipt.productDescription}</td>
+                        <td>
+                          {/* Show the first item as a summary and a count if there are more */}
+                          <div>{receipt.firstItemDescription}</div>
+                          {receipt.itemCount > 1 && (
+                            <small className="text-muted">
+                              +{receipt.itemCount - 1} more item{receipt.itemCount - 1 > 1 ? 's' : ''}
+                            </small>
+                          )}
+                        </td>
                         <td>{formatDate(receipt.purchaseDate)}</td>
-                        <td>{formatCurrency(receipt.price)}</td>
+                        <td>{formatCurrency(receipt.totalPrice)}</td>
                         <td>
                           <div>{receipt.warrantyMonths} months</div>
                           <small className="text-muted">
-                            {/* Use warrantyExpiry (correct backend field name) */}
                             Expires: {formatDate(receipt.warrantyExpiry)}
                           </small>
                         </td>

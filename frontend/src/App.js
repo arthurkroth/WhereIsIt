@@ -1,7 +1,6 @@
 /**
  * File: App.js
  * Author: Arthur Kroth - x22166971
- * Date: 11/02/2026
  * WhereIsIt Project
  */
 
@@ -17,18 +16,22 @@ import ForgotPassword from './pages/ForgotPassword';
 import ResetPassword from './pages/ResetPassword';
 import MfaVerify from './pages/MfaVerify';
 import Dashboard from './pages/Dashboard';
+import Profile from './pages/Profile';
 import MfaSetup from './pages/MfaSetup';
 import ReceiptUpload from './pages/ReceiptUpload';
 import ReceiptManual from './pages/ReceiptManual';
 import ReceiptList from './pages/ReceiptList';
+import ReceiptDetail from './pages/ReceiptDetail';
 import AdminAuditLogs from './pages/AdminAuditLogs';
 import 'bootstrap/dist/css/bootstrap.min.css';
-import ReceiptDetail from './pages/ReceiptDetail';
-
 
 /**
  * Main App component that sets up routing and authentication context.
  * All routes are wrapped in AuthProvider to manage user authentication state.
+ *
+ * NOTE: The page wrapper uses "mt-4" without "container" so that pages like
+ * the split-screen receipt upload review can use full browser width via
+ * Container fluid. Each individual page manages its own container width.
  */
 function App() {
   return (
@@ -36,7 +39,8 @@ function App() {
       <Router>
         <div className="App">
           <NavigationBar />
-          <div className="container mt-4">
+          {/* No container class here — each page manages its own width */}
+          <div className="mt-4">
             <Routes>
               {/* Public routes */}
               <Route path="/login" element={<Login />} />
@@ -45,7 +49,7 @@ function App() {
               <Route path="/reset-password" element={<ResetPassword />} />
               <Route path="/mfa-verify" element={<MfaVerify />} />
 
-              {/* Protected routes - require authentication */}
+              {/* Protected routes — require authentication */}
               <Route
                 path="/dashboard"
                 element={
@@ -54,6 +58,15 @@ function App() {
                   </ProtectedRoute>
                 }
               />
+              <Route
+                path="/profile"
+                element={
+                  <ProtectedRoute>
+                    <Profile />
+                  </ProtectedRoute>
+                }
+              />
+              {/* Keep /mfa-setup as a redirect to profile for backwards compatibility */}
               <Route
                 path="/mfa-setup"
                 element={
@@ -94,6 +107,7 @@ function App() {
                   </ProtectedRoute>
                 }
               />
+
               {/* Admin-only routes */}
               <Route
                 path="/admin/audit-logs"

@@ -1,7 +1,6 @@
 /**
  * File: Login.js
  * Author: Arthur Kroth - x22166971
- * Date: 11/02/2026
  * WhereIsIt Project
  */
 
@@ -14,13 +13,17 @@ import { login, verifyMfaLogin } from '../services/api';
 /**
  * Login page component.
  * Handles user authentication with optional MFA verification.
- * 
+ *
  * SECURITY NOTES:
+ * - No client-side email format or password length validation on login.
+ *   This is intentional - validating these fields before the API call
+ *   would leak information about what is wrong (e.g. "invalid email format"
+ *   vs "wrong password"), which could aid enumeration attacks.
+ * - All login errors show the same generic message: "Invalid email or password"
+ * - The error message is never cleared automatically - only on a new submission
+ *   attempt, so the user always has time to read it
  * - Password input type is 'password' to prevent shoulder surfing
- * - Client-side validation before API call
- * - Errors are displayed generically to prevent user enumeration
- * - MFA token input is separate step after password verification
- * - Form data is not logged or stored insecurely
+ * - MFA token input is a separate step after password verification
  */
 const Login = () => {
   const navigate = useNavigate();
@@ -30,65 +33,51 @@ const Login = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
   const [mfaToken, setMfaToken] = useState('');
-  
+
   // UI state
   const [showMfa, setShowMfa] = useState(false);
   const [mfaUserId, setMfaUserId] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
-  const [validated, setValidated] = useState(false);
 
   /**
-   * Validates email format.
-   * @param {string} email - Email to validate
-   * @returns {boolean} True if valid
-   */
-  const isValidEmail = (email) => {
-    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
-    return emailRegex.test(email);
-  };
-
-  /**
-   * Handles initial login form submission.
-   * Either returns JWT or prompts for MFA.
+   * Handles the login form submission.
+   *
+   * SECURITY: Only checks that fields are not empty before calling the API.
+   * We deliberately do NOT validate email format or password length here,
+   * as doing so would reveal information about what is wrong with the input.
+   * All validation errors from the backend are shown as the same generic message.
    */
   const handleLogin = async (e) => {
     e.preventDefault();
-    setValidated(true);
 
-    // Client-side validation
+    // Only check that fields are not empty - no further client-side validation
     if (!email || !password) {
       setError('Please fill in all fields');
       return;
     }
 
-    if (!isValidEmail(email)) {
-      setError('Please enter a valid email address');
-      return;
-    }
-
-    if (password.length < 10) {
-      setError('Password must be at least 10 characters');
-      return;
-    }
-
-    setError('');
     setLoading(true);
 
     try {
       const response = await login(email, password);
 
-      // Check if MFA is required
+      // Clear any previous error only on a successful API response
+      setError('');
+
       if (response.data.mfaRequired) {
+        // MFA is required - show the MFA token form
         setShowMfa(true);
         setMfaUserId(response.data.userId);
       } else {
-        // Login successful, no MFA required
+        // Login successful with no MFA
         loginUser(response.data.token);
         navigate('/dashboard');
       }
     } catch (err) {
-      // Generic error message to prevent user enumeration
+      // Always show the same generic error regardless of what went wrong.
+      // This prevents attackers from knowing whether the email exists,
+      // whether the password was close, or any other details.
       setError('Invalid email or password');
       console.error('Login error:', err);
     } finally {
@@ -97,7 +86,7 @@ const Login = () => {
   };
 
   /**
-   * Handles MFA token verification.
+   * Handles MFA token verification after the initial login step.
    */
   const handleMfaVerify = async (e) => {
     e.preventDefault();
@@ -107,13 +96,11 @@ const Login = () => {
       return;
     }
 
-    setError('');
     setLoading(true);
 
     try {
       const response = await verifyMfaLogin(mfaUserId, mfaToken);
-      
-      // MFA verification successful
+      setError('');
       loginUser(response.data.token);
       navigate('/dashboard');
     } catch (err) {
@@ -125,7 +112,7 @@ const Login = () => {
   };
 
   /**
-   * Resets MFA form and goes back to login.
+   * Resets the MFA form and returns to the email/password step.
    */
   const handleBackToLogin = () => {
     setShowMfa(false);
@@ -144,6 +131,7 @@ const Login = () => {
                 {showMfa ? 'Enter MFA Token' : 'Login to WhereIsIt?'}
               </h2>
 
+              {/* Error alert - not dismissible so it stays visible until next attempt */}
               {error && (
                 <Alert variant="danger" className="mb-3">
                   {error}
@@ -151,8 +139,8 @@ const Login = () => {
               )}
 
               {!showMfa ? (
-                // Email and Password form
-                <Form noValidate validated={validated} onSubmit={handleLogin}>
+                // Email and password form
+                <Form noValidate onSubmit={handleLogin}>
                   <Form.Group className="mb-3" controlId="formEmail">
                     <Form.Label>Email address</Form.Label>
                     <Form.Control
@@ -160,12 +148,8 @@ const Login = () => {
                       placeholder="Enter email"
                       value={email}
                       onChange={(e) => setEmail(e.target.value)}
-                      required
                       disabled={loading}
                     />
-                    <Form.Control.Feedback type="invalid">
-                      Please provide a valid email.
-                    </Form.Control.Feedback>
                   </Form.Group>
 
                   <Form.Group className="mb-3" controlId="formPassword">
@@ -175,13 +159,8 @@ const Login = () => {
                       placeholder="Password"
                       value={password}
                       onChange={(e) => setPassword(e.target.value)}
-                      required
-                      minLength={10}
                       disabled={loading}
                     />
-                    <Form.Control.Feedback type="invalid">
-                      Password must be at least 10 characters.
-                    </Form.Control.Feedback>
                   </Form.Group>
 
                   <Button
@@ -208,8 +187,8 @@ const Login = () => {
                   </Button>
                 </Form>
               ) : (
-                // MFA Token form
-                <Form onSubmit={handleMfaVerify}>
+                // MFA token form - shown after successful password verification
+                <Form noValidate onSubmit={handleMfaVerify}>
                   <Alert variant="info">
                     Please enter the 6-digit code from your authenticator app.
                   </Alert>
@@ -222,7 +201,6 @@ const Login = () => {
                       value={mfaToken}
                       onChange={(e) => setMfaToken(e.target.value.replace(/\D/g, ''))}
                       maxLength={8}
-                      required
                       disabled={loading}
                       autoFocus
                     />

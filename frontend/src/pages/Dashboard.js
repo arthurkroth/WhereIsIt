@@ -1,7 +1,6 @@
 /**
  * File: Dashboard.js
  * Author: Arthur Kroth - x22166971
- * Date: 11/02/2026
  * WhereIsIt Project
  */
 
@@ -13,13 +12,19 @@ import { listReceipts } from '../services/api';
 
 /**
  * Dashboard page component.
- * Shows user overview and recent receipts with warranty status.
+ * Shows a personalised welcome message and receipt overview.
  *
  * FEATURES:
- * - Welcome message with user info
+ * - Personalised greeting using the user's first name
  * - Summary statistics (total receipts, active/expired warranties, total value)
  * - Recent receipts with warranty status
  * - Quick action buttons
+ *
+ * NOTE ON FIELD NAMES:
+ * Since moving to the multi-item receipt structure, receipts no longer have
+ * a single 'price' or 'productDescription' field. The correct fields are:
+ * - receipt.totalPrice     (the total price of the whole receipt)
+ * - receipt.firstItemDescription  (summary of the first item for display)
  */
 const Dashboard = () => {
   const { user } = useAuth();
@@ -50,9 +55,7 @@ const Dashboard = () => {
   };
 
   /**
-   * Calculates warranty status for a receipt.
-   * Uses receipt.warrantyExpiry (correct backend field name).
-   *
+   * Calculates warranty status for a receipt based on its expiry date.
    * @param {string} warrantyExpiry - Expiry date (YYYY-MM-DD)
    * @returns {Object} Status object with Bootstrap variant and display text
    */
@@ -72,7 +75,6 @@ const Dashboard = () => {
 
   /**
    * Formats a date string for display, handling invalid dates gracefully.
-   *
    * @param {string} dateString - Date string to format
    * @returns {string} Formatted date or 'N/A'
    */
@@ -89,14 +91,15 @@ const Dashboard = () => {
 
   /**
    * Calculates summary statistics from the receipts list.
-   * Uses receipt.warrantyExpiry and receipt.price (correct backend field names).
    *
-   * @returns {Object} Stats object with total, active, expired, totalValue
+   * Total value uses receipt.totalPrice (the total for the whole receipt),
+   * not individual item prices, to avoid double-counting.
+   *
+   * @returns {Object} Stats with total, active, expired, totalValue
    */
   const getStatistics = () => {
     const total = receipts.length;
 
-    // Count receipts where the warranty expiry is in the future
     const active = receipts.filter((r) => {
       const expiryDate = new Date(r.warrantyExpiry);
       return expiryDate > new Date();
@@ -104,9 +107,9 @@ const Dashboard = () => {
 
     const expired = total - active;
 
-    // Sum up all receipt prices - use receipt.price (correct backend field name)
+    // Use totalPrice (sum of all items on the receipt) not individual item price
     const totalValue = receipts.reduce((sum, r) => {
-      const price = parseFloat(r.price);
+      const price = parseFloat(r.totalPrice);
       return sum + (isNaN(price) ? 0 : price);
     }, 0);
 
@@ -117,8 +120,8 @@ const Dashboard = () => {
 
   if (loading) {
     return (
-      <Container className="main-container">
-        <div className="spinner-container">
+      <Container>
+        <div className="text-center mt-5">
           <Spinner animation="border" role="status">
             <span className="visually-hidden">Loading...</span>
           </Spinner>
@@ -128,7 +131,7 @@ const Dashboard = () => {
   }
 
   return (
-    <Container className="main-container">
+    <Container>
       <h1 className="mb-4">Dashboard</h1>
 
       {error && (
@@ -137,12 +140,14 @@ const Dashboard = () => {
         </Alert>
       )}
 
-      {/* Welcome Card */}
+      {/* Personalised Welcome Card - greets user by first name */}
       <Card className="mb-4">
         <Card.Body>
-          <h3>Welcome back!</h3>
-          <p className="mb-0">
-            User ID: <strong>{user?.userId}</strong> | Account Type: <strong>{user?.role}</strong>
+          <h3>
+            Welcome back, {user?.firstName ? user.firstName : 'there'}!
+          </h3>
+          <p className="mb-0 text-muted">
+            Account Type: <strong>{user?.role}</strong>
           </p>
         </Card.Body>
       </Card>
@@ -214,13 +219,25 @@ const Dashboard = () => {
       ) : (
         <Row>
           {receipts.slice(0, 6).map((receipt) => {
-            // Use warrantyExpiry (correct backend field name)
             const warrantyStatus = getWarrantyStatus(receipt.warrantyExpiry);
             return (
               <Col md={6} lg={4} key={receipt.id}>
-                <Card className="receipt-card mb-3">
+              <Card
+                className="mb-3"
+                as={Link}
+                to={`/receipts/${receipt.id}`}
+                style={{ cursor: 'pointer', textDecoration: 'none', color: 'inherit' }}
+              >
                   <Card.Body>
-                    <Card.Title>{receipt.productDescription}</Card.Title>
+                    {/* Show the first item description as a summary */}
+                    <Card.Title className="fs-6">
+                      {receipt.firstItemDescription || 'No items'}
+                      {receipt.itemCount > 1 && (
+                        <span className="text-muted fw-normal fs-6">
+                          {' '}+{receipt.itemCount - 1} more
+                        </span>
+                      )}
+                    </Card.Title>
                     <Card.Subtitle className="mb-2 text-muted">
                       {receipt.storeName}
                     </Card.Subtitle>
@@ -228,12 +245,11 @@ const Dashboard = () => {
                       <small>
                         <strong>Purchase Date:</strong> {formatDate(receipt.purchaseDate)}
                         <br />
-                        {/* Use receipt.price (correct backend field name) */}
-                        <strong>Price:</strong> €{parseFloat(receipt.price || 0).toFixed(2)}
+                        {/* totalPrice is the sum of all items on this receipt */}
+                        <strong>Price:</strong> €{parseFloat(receipt.totalPrice || 0).toFixed(2)}
                         <br />
                         <strong>Warranty:</strong> {receipt.warrantyMonths} months
                         <br />
-                        {/* Use warrantyExpiry (correct backend field name) */}
                         <strong>Expires:</strong> {formatDate(receipt.warrantyExpiry)}
                       </small>
                     </Card.Text>

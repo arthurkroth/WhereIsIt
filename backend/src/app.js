@@ -1,7 +1,6 @@
 /**
  * Express App Configuration
  * Author: Arthur Kroth - x22166971
- * Date: 03/10/2026
  * WhereIsIt Project
  */
 
