@@ -256,7 +256,7 @@ jobs:
       # --format HTML    - output as a readable HTML report
       # --out            - where to save the report
       # --failOnCVSS 9   - only fail the job on CRITICAL (CVSS >= 9) findings
-      # --nvdApiKey      - optional, speeds up NVD data fetching
+      # --nvdApiKey      - Key for faster NVD access.
       - run:
           name: OWASP Dependency-Check scan
           command: |
