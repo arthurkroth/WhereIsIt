@@ -3,86 +3,70 @@
 # Author: Arthur Kroth - x22166971
 #
 # This pipeline runs automatically on every push to the dev branch.
-# It performs two parallel jobs:
+# It performs FIVE parallel jobs:
 #
-#   1. backend-checks - installs dependencies, runs a security audit,
-#      and verifies the backend modules load without errors
+#   1. backend-checks    - installs dependencies, runs npm security audit,
+#                          and verifies backend modules load without errors
 #
-#   2. frontend-checks - installs dependencies, runs a security audit,
-#      and builds the React app to catch any compilation errors
+#   2. frontend-checks   - installs dependencies, runs npm security audit,
+#                          and builds the React app to catch compile errors
 #
-# Both jobs must pass before a merge to main is considered safe.
+#   3. secret-scan       - Gitleaks scans every file in the repo for
+#                          accidentally committed secrets, API keys, or tokens
 #
-# NOTE: This config uses plain `npm install` rather than `npm ci`.
-# `npm ci` requires a committed package-lock.json that is perfectly in sync
-# with package.json. `npm install` is more forgiving and works correctly
-# even when the lock file is absent or was generated on a different OS.
+#   4. sast-scan         - Semgrep performs Static Application Security Testing
+#                          (SAST) against the OWASP Top 10 and Node.js security
+#                          rule sets, flagging insecure code patterns
+#
+#   5. dependency-check  - OWASP Dependency-Check scans all dependencies
+#                          against the National Vulnerability Database (NVD),
+#                          producing an HTML report saved as a build artifact
+#
+# All five jobs run in PARALLEL to keep pipeline duration short.
+# Both backend-checks and frontend-checks must pass for a merge to main.
+# Security scan jobs (3-5) report findings but do not block merges,
+# allowing to review and remediate without blocking progress.
 # =============================================================================
 
 version: 2.1
 
-# =============================================================================
-# ORBS
-# CircleCI orbs are reusable packages that simplify common pipeline tasks.
-# We declare the node orb here but only use it for its Docker image - all
-# install steps are handled manually below with plain npm install commands.
-# =============================================================================
 orbs:
   node: circleci/node@5.2.0
 
 # =============================================================================
 # JOBS
-# Each job runs in its own isolated Docker container.
-# Jobs declared in the same workflow run in PARALLEL by default,
-# which keeps the total pipeline time as short as possible.
 # =============================================================================
 jobs:
 
   # ---------------------------------------------------------------------------
   # JOB 1: Backend Checks
-  # Runs inside a Node.js 20 LTS Docker container on Linux (Ubuntu).
-  # This mirrors a typical production/deployment environment.
+  # Installs backend dependencies, audits for known CVEs, and verifies that
+  # all core modules (auth validation, encryption, OCR) load without errors.
   # ---------------------------------------------------------------------------
   backend-checks:
     docker:
-      - image: cimg/node:20.18  # Official CircleCI Node.js 20 image
-
+      - image: cimg/node:20.18
     steps:
-      # Checkout - pulls the repository code into the container at the
-      # current commit that triggered this pipeline run.
       - checkout
 
-      # Install backend dependencies.
-      # Uses `npm install` (not `npm ci`) so it works regardless of whether
-      # a package-lock.json is present or was generated on a different OS.
-      # All packages listed in backend/package.json are installed here,
-      # including bcryptjs, nodemailer, tesseract.js, zod, express, etc.
+      # Install all backend dependencies listed in package.json
       - run:
           name: Install backend dependencies
           command: cd backend && npm install
 
-      # Security audit - scans all installed backend packages against the
-      # npm vulnerability advisory database to detect known CVEs.
-      # --audit-level=high means the job only fails for HIGH or CRITICAL
-      # severity issues. Low/moderate findings are reported but do not
-      # block the pipeline. The `|| true` ensures the job continues even
-      # if vulnerabilities are found, so we see the full audit report.
-      # This check is especially important given the cybersecurity focus
-      # of this project - dependencies are a major attack surface.
+      # npm audit - quick first-pass vulnerability scan using the npm advisory
+      # database. Only HIGH and CRITICAL findings are reported here.
+      # The full deep scan is handled by OWASP Dependency-Check in job 5.
       - run:
           name: Security audit (backend)
           command: cd backend && npm audit --audit-level=high || true
 
-      # Module load check - attempts to require the three most critical
-      # backend modules to catch any missing imports, broken requires,
-      # or syntax errors without needing a running database or full test suite.
-      # If any of these fail to load, the job exits with a non-zero code
-      # and the pipeline is marked as failed.
-      #
-      # Modules checked:
-      #   - authValidation.js  - Zod schemas for all auth endpoints
-      #   - encryptionService.js - AES-256-GCM encryption/decryption
-      #   - ocrService.js      - Tesseract OCR and PDF parsing logic
+      # Module load check - requires the three most security-critical modules
+      # to catch broken imports or syntax errors without a running database.
+      # Checked modules:
+      #   authValidation.js  - Zod schemas for all auth endpoints
+      #   encryptionService  - AES-256-GCM encryption/decryption
+      #   ocrService         - Tesseract OCR and PDF parsing
       - run:
           name: Verify backend modules load
           command: |
@@ -96,73 +80,237 @@ jobs:
 
   # ---------------------------------------------------------------------------
   # JOB 2: Frontend Checks
-  # Runs inside a Node.js 20 LTS Docker container on Linux (Ubuntu).
+  # Installs frontend dependencies, audits for known CVEs, and performs a
+  # full React production build to catch any compilation errors.
   # ---------------------------------------------------------------------------
   frontend-checks:
     docker:
-      - image: cimg/node:20.18  # Official CircleCI Node.js 20 image
-
+      - image: cimg/node:20.18
     steps:
-      # Checkout - pulls the repository code into the container.
       - checkout
 
-      # Install frontend dependencies.
-      # Installs all packages listed in frontend/package.json including
-      # React, React Router, React Bootstrap, Axios, qrcode.react, etc.
-      # Uses `npm install` for the same reason as the backend job above.
+      # Install all frontend dependencies listed in package.json
       - run:
           name: Install frontend dependencies
           command: cd frontend && npm install
 
-      # Security audit - scans all installed frontend packages for known CVEs.
-      # Frontend dependencies are a common attack vector (supply chain attacks,
-      # XSS via malicious packages, etc.) so auditing both sides is important.
-      # Same --audit-level=high policy as the backend audit above.
+      # npm audit - quick CVE scan for frontend packages.
+      # Frontend dependencies are a common supply chain attack vector.
       - run:
           name: Security audit (frontend)
           command: cd frontend && npm audit --audit-level=high || true
 
-      # Production build - compiles the entire React application using
-      # Create React App's Webpack configuration into static files.
-      # This step catches:
-      #   - JSX syntax errors
-      #   - Missing or broken imports
-      #   - Broken components that fail at compile time
-      #   - Any TypeScript/prop-type errors (if applicable)
-      # CI=false prevents ESLint warnings from being treated as build errors,
-      # which would cause false positives on a student project with warnings
-      # that don't affect functionality.
+      # Full React production build - compiles the app with Webpack.
+      # Catches JSX syntax errors, missing imports, and broken components.
+      # CI=false prevents ESLint warnings from being treated as build errors.
       - run:
           name: Build React app
           command: cd frontend && CI=false npm run build
 
-      # Build verification - confirms the Webpack output was actually generated
-      # by checking for the existence of the main index.html entry point.
-      # If the build step above silently failed, this step will catch it.
+      # Verify the main build output exists after compilation
       - run:
           name: Verify build output exists
           command: |
             ls frontend/build/index.html && echo "Build output verified."
 
+  # ---------------------------------------------------------------------------
+  # JOB 3: Secret Scanning with Gitleaks
+  # Gitleaks scans every file in the repository for accidentally committed
+  # secrets including API keys, passwords, JWT secrets, private keys,
+  # database connection strings, and other sensitive credentials.
+  #
+  # This is a HARD FAIL job - if any secrets are detected the pipeline
+  # stops immediately, as committed secrets are a critical security risk
+  # that must be remediated before any merge proceeds.
+  #
+  # Gitleaks uses a large built-in ruleset covering 150+ secret patterns
+  # including AWS keys, GitHub tokens, generic API keys, and more.
+  # ---------------------------------------------------------------------------
+  secret-scan:
+    docker:
+      - image: cimg/node:20.18
+    steps:
+      - checkout
+
+      # Download the Gitleaks binary for Linux x64
+      - run:
+          name: Install Gitleaks
+          command: |
+            wget -q https://github.com/gitleaks/gitleaks/releases/download/v8.18.0/gitleaks_8.18.0_linux_x64.tar.gz
+            tar -xzf gitleaks_8.18.0_linux_x64.tar.gz
+            chmod +x gitleaks
+            sudo mv gitleaks /usr/local/bin/gitleaks
+
+      # Run Gitleaks against the entire repository.
+      # --verbose shows each finding in detail in the pipeline log.
+      # --no-git scans files directly rather than git history,
+      # which is faster and catches current state of all files.
+      # Exit code 1 means secrets were found - this fails the pipeline.
+      - run:
+          name: Scan for leaked secrets
+          command: |
+            gitleaks detect \
+              --source . \
+              --verbose \
+              --no-git \
+              --redact
+
+  # ---------------------------------------------------------------------------
+  # JOB 4: Static Application Security Testing (SAST) with Semgrep
+  # Semgrep analyses the actual source code for insecure coding patterns
+  # without executing it. This is Static Application Security Testing (SAST).
+  #
+  # Rule sets applied:
+  #   p/nodejs        - Node.js-specific security issues (prototype pollution,
+  #                     path traversal, command injection, etc.)
+  #   p/jwt           - JWT misuse patterns (weak algorithms, missing
+  #                     verification, hardcoded secrets in tokens)
+  #   p/owasp-top-ten - Maps findings directly to the OWASP Top 10
+  #                     vulnerability categories (A01-A10:2021)
+  #   p/nodejsscan    - Additional Node.js security checks
+  #
+  # This job uses || true so findings are REPORTED but do not block merges.
+  # Review the pipeline log for any flagged patterns and remediate them
+  # before the final submission / penetration test.
+  # ---------------------------------------------------------------------------
+  sast-scan:
+    docker:
+      - image: cimg/python:3.11  # Semgrep is a Python tool
+    steps:
+      - checkout
+
+      # Install Semgrep via pip - no account or token required for
+      # the community rule sets used here
+      - run:
+          name: Install Semgrep
+          command: pip install semgrep --quiet
+
+      # Run Semgrep against all backend source code.
+      # --config specifies the rule sets to apply.
+      # --json outputs structured results for easier review.
+      # --no-rewrite-rule-ids keeps original rule IDs in output.
+      # || true means findings are reported but the job stays green.
+      - run:
+          name: SAST scan - Backend (OWASP Top 10, Node.js, JWT)
+          command: |
+            semgrep scan \
+              --config p/nodejs \
+              --config p/jwt \
+              --config p/owasp-top-ten \
+              --config p/nodejsscan \
+              backend/src/ \
+              --verbose \
+              || true
+
+      # Also scan frontend source for common React/JS security issues
+      - run:
+          name: SAST scan - Frontend (OWASP Top 10, Node.js)
+          command: |
+            semgrep scan \
+              --config p/nodejs \
+              --config p/owasp-top-ten \
+              frontend/src/ \
+              --verbose \
+              || true
+
+  # ---------------------------------------------------------------------------
+  # JOB 5: OWASP Dependency-Check
+  # OWASP Dependency-Check performs a deep scan of all project dependencies
+  # against the full National Vulnerability Database (NVD), which is more
+  # comprehensive than npm audit. It identifies CVEs in transitive (indirect)
+  # dependencies that npm audit sometimes misses.
+  #
+  # Output: An HTML report is saved as a build artifact in CircleCI.
+  # To view it: CircleCI → Pipeline run → Artifacts tab → open the HTML file.
+  # This report can be included directly in your penetration testing report.
+  #
+  # NOTE: For faster NVD data fetching, add NVD_API_KEY to your CircleCI
+  # environment variables (free key at https://nvd.nist.gov/developers/request-an-api-key).
+  # Without it the scan still works but may be rate-limited.
+  #
+  # This job REPORTS findings but does not block merges (|| true).
+  # ---------------------------------------------------------------------------
+  dependency-check:
+    docker:
+      - image: cimg/node:20.18
+    steps:
+      - checkout
+
+      # Install Java - required by OWASP Dependency-Check (it is a Java tool)
+      - run:
+          name: Install Java runtime
+          command: |
+            sudo apt-get update -qq
+            sudo apt-get install -y default-jre
+
+      # Download the OWASP Dependency-Check CLI tool
+      - run:
+          name: Download OWASP Dependency-Check
+          command: |
+            wget -q https://github.com/jeremylong/DependencyCheck/releases/download/v9.0.9/dependency-check-9.0.9-release.zip
+            unzip -q dependency-check-9.0.9-release.zip
+
+      # Run the scan against both backend and frontend directories.
+      # --project        - project name shown in the report
+      # --scan           - directories to scan
+      # --format HTML    - output as a readable HTML report
+      # --out            - where to save the report
+      # --failOnCVSS 9   - only fail the job on CRITICAL (CVSS >= 9) findings
+      # --nvdApiKey      - optional, speeds up NVD data fetching
+      - run:
+          name: OWASP Dependency-Check scan
+          command: |
+            ./dependency-check/bin/dependency-check.sh \
+              --project "WhereIsIt" \
+              --scan backend/ \
+              --scan frontend/ \
+              --format HTML \
+              --format JSON \
+              --out dependency-check-report \
+              --failOnCVSS 9 \
+              ${NVD_API_KEY:+--nvdApiKey $NVD_API_KEY} \
+              || true
+
+      # Save the HTML report as a CircleCI build artifact.
+      # After the pipeline runs, go to:
+      # CircleCI → Pipeline → Artifacts → dependency-check-report.html
+      # This report is suitable for inclusion in your pentest documentation.
+      - store_artifacts:
+          path: dependency-check-report
+          destination: owasp-dependency-check-report
+
 # =============================================================================
 # WORKFLOWS
-# Workflows define when jobs run and in what order.
-#
-# dev-pipeline:
-#   - Runs ONLY on the dev branch (enforced by the branch filter below)
-#   - Both jobs run IN PARALLEL to minimise total pipeline duration
-#   - Any push to dev (including empty commits) triggers this workflow
-#   - Pushes to main, feature branches, or other branches are ignored
+# All five jobs run in PARALLEL to minimise total pipeline duration.
+# The branch filter ensures this pipeline ONLY triggers on pushes to dev.
+# Pushes to main, feature branches, or any other branch are ignored.
 # =============================================================================
 workflows:
   dev-pipeline:
     jobs:
+      # Core quality checks - these must pass before merging to main
       - backend-checks:
           filters:
             branches:
-              only: dev    # Only triggers on pushes to the dev branch
+              only: dev
 
       - frontend-checks:
           filters:
             branches:
-              only: dev    # Only triggers on pushes to the dev branch
+              only: dev
+
+      # Security scanning jobs - run in parallel with the core checks
+      - secret-scan:
+          filters:
+            branches:
+              only: dev
+
+      - sast-scan:
+          filters:
+            branches:
+              only: dev
+
+      - dependency-check:
+          filters:
+            branches:
+              only: dev
