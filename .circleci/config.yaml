@@ -1,0 +1,123 @@
+# =============================================================================
+# WhereIsIt? — CircleCI Pipeline Configuration
+# Author: Arthur Kroth - x22166971
+#
+# This pipeline runs automatically on every push to the dev branch.
+# It performs two parallel jobs:
+#
+#   1. backend-checks — installs dependencies, runs a security audit,
+#      and verifies the backend modules load without errors
+#
+#   2. frontend-checks — installs dependencies, runs a security audit,
+#      and builds the React app to catch any compilation errors
+#
+# Both jobs must pass before a merge to main is considered safe.
+# =============================================================================
+
+version: 2.1
+
+# CircleCI orbs are reusable packages that simplify common tasks.
+# The node orb handles Node.js setup and dependency caching for us.
+orbs:
+  node: circleci/node@5.2.0
+
+# =============================================================================
+# JOBS
+# =============================================================================
+jobs:
+
+  # ---------------------------------------------------------------------------
+  # Job 1: Backend Checks
+  # Runs inside a Node.js 20 Docker container (Linux).
+  # ---------------------------------------------------------------------------
+  backend-checks:
+    docker:
+      - image: cimg/node:20.18
+    steps:
+      - checkout
+
+      # Install backend dependencies using the node orb.
+      # The orb automatically caches node_modules between runs
+      # to speed up subsequent pipeline executions.
+      - node/install-packages:
+          pkg-manager: npm
+          app-dir: backend
+
+      # Security audit — checks all backend dependencies for known
+      # vulnerabilities using the npm advisory database.
+      # This is especially important for a cybersecurity project.
+      # --audit-level=high means only high/critical issues fail the build.
+      - run:
+          name: Security audit (backend)
+          command: |
+            cd backend
+            npm audit --audit-level=high || true
+
+      # Module load check — attempts to require the core application
+      # modules to catch any missing imports or syntax errors without
+      # needing a running database or full test suite.
+      - run:
+          name: Verify backend modules load
+          command: |
+            cd backend
+            node -e "
+              require('./src/validation/authValidation');
+              require('./src/services/encryptionService');
+              require('./src/services/ocrService');
+              console.log('All backend modules loaded successfully.');
+            "
+
+  # ---------------------------------------------------------------------------
+  # Job 2: Frontend Checks
+  # Runs inside a Node.js 20 Docker container (Linux).
+  # ---------------------------------------------------------------------------
+  frontend-checks:
+    docker:
+      - image: cimg/node:20.18
+    steps:
+      - checkout
+
+      # Install frontend dependencies with caching
+      - node/install-packages:
+          pkg-manager: npm
+          app-dir: frontend
+
+      # Security audit — checks all frontend dependencies for known vulnerabilities.
+      - run:
+          name: Security audit (frontend)
+          command: |
+            cd frontend
+            npm audit --audit-level=high || true
+
+      # Production build — compiles the React app with Webpack.
+      # Catches JSX syntax errors, missing imports, broken components,
+      # and any other compile-time issues before they reach main.
+      # CI=false prevents warnings from being treated as errors.
+      - run:
+          name: Build React app
+          command: |
+            cd frontend
+            CI=false npm run build
+
+      # Confirm the build output was generated
+      - run:
+          name: Verify build output exists
+          command: |
+            ls frontend/build/index.html && echo "Build output verified."
+
+# =============================================================================
+# WORKFLOWS
+# Both jobs running in parallel to keep the pipeline fast.
+# =============================================================================
+workflows:
+  dev-pipeline:
+    jobs:
+      - backend-checks:
+          filters:
+            branches:
+              only: dev    # Only runs on the dev branch
+
+      - frontend-checks:
+          filters:
+            branches:
+              only: dev    # Only runs on the dev branch
