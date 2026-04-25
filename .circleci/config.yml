@@ -260,6 +260,7 @@ jobs:
       - run:
           name: OWASP Dependency-Check scan
           command: |
+            mkdir -p dependency-check-report
             ./dependency-check/bin/dependency-check.sh \
               --project "WhereIsIt" \
               --scan backend/ \
