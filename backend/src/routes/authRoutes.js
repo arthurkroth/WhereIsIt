@@ -1,5 +1,5 @@
 /**
- * Authentication routes for user registration, login, MFA, and profile management.
+ * Authentication routes for registration, login, MFA, email verification, and profile management.
  * Author: Arthur Kroth - x22166971
  * WhereIsIt Project
  */
@@ -13,20 +13,23 @@ const { requireAuth } = require("../middleware/authMiddleware");
 const {
   register,
   login,
+  getCaptcha,
+  verifyEmail,
+  resendVerification,
   beginMfaSetup,
   confirmMfaSetup,
   verifyMfaLogin,
+  disableMfa,
   getProfile,
   updateProfile,
   changeEmail,
-  changePassword,
-  disableMfa
+  changePassword
 } = require("../controllers/authController");
 
 const authRoutes = Router();
 
 // ============================================================================
-// PUBLIC ROUTES — no authentication required
+// PUBLIC ROUTES
 // ============================================================================
 
 // POST /auth/register — Register new user account
@@ -35,27 +38,31 @@ authRoutes.post("/register", asyncHandler(register));
 // POST /auth/login — Login with email and password
 authRoutes.post("/login", asyncHandler(login));
 
-// POST /auth/mfa/login-verify — Verify MFA token during login
+// GET /auth/captcha — Generate a math captcha challenge
+authRoutes.get("/captcha", asyncHandler(getCaptcha));
+
+// GET /auth/verify-email?token=... — Verify email address from link
+authRoutes.get("/verify-email", asyncHandler(verifyEmail));
+
+// POST /auth/resend-verification — Resend verification email
+authRoutes.post("/resend-verification", asyncHandler(resendVerification));
+
+// POST /auth/mfa/login-verify — Verify MFA token or recovery code during login
 authRoutes.post("/mfa/login-verify", asyncHandler(verifyMfaLogin));
 
-// POST /auth/forgot-password — Request password reset email
+// POST /auth/forgot-password — Request password reset
 authRoutes.post("/forgot-password", async (req, res) => {
   try {
     const { email } = req.body;
+    if (!email) return res.status(400).json({ error: "Email is required" });
 
-    if (!email) {
-      return res.status(400).json({ error: "Email is required" });
-    }
-
-    // Check if user exists (but don't reveal this to the client)
     const [rows] = await db.execute(
-      "SELECT id, email FROM users WHERE email = ? LIMIT 1",
+      "SELECT id, first_name, email FROM users WHERE email = ? LIMIT 1",
       [email]
     );
 
+    // Always return success to prevent email enumeration
     if (rows.length === 0) {
-      // Return success anyway to prevent email enumeration attacks
-      console.log('Password reset attempted for non-existent email:', email);
       return res.json({
         success: true,
         message: "If an account with that email exists, a password reset link will be sent."
@@ -63,14 +70,8 @@ authRoutes.post("/forgot-password", async (req, res) => {
     }
 
     const user = rows[0];
-
-    // Generate a secure random token
     const resetToken = crypto.randomBytes(32).toString('hex');
-
-    // Hash the token before storing — we never store plain tokens
     const hashedToken = crypto.createHash('sha256').update(resetToken).digest('hex');
-
-    // Set expiry to 1 hour from now
     const expiresAt = new Date(Date.now() + 60 * 60 * 1000);
 
     await db.execute(
@@ -87,24 +88,30 @@ authRoutes.post("/forgot-password", async (req, res) => {
       console.log('Audit log skipped:', err.message);
     }
 
-    // Development mode: return token directly for testing
-    // In production this would send an email instead
+    // Development mode — log the token to console and return in response
     const isDevelopment = process.env.NODE_ENV !== 'production';
-
     if (isDevelopment) {
+      // Also send via email so the Ethereal preview URL is logged
+      try {
+        const emailService = require("../services/emailService");
+        await emailService.sendPasswordResetEmail(user.email, user.first_name, resetToken);
+      } catch (err) {
+        console.error('Failed to send password reset email:', err.message);
+      }
+
       console.log('Password reset token for', email, ':', resetToken);
       return res.json({
         success: true,
         message: "Password reset token generated (development mode)",
-        resetToken: resetToken,
+        resetToken,
         resetUrl: `http://localhost:3000/reset-password?token=${resetToken}`
       });
-    } else {
-      return res.json({
-        success: true,
-        message: "If an account with that email exists, a password reset link will be sent."
-      });
     }
+
+    return res.json({
+      success: true,
+      message: "If an account with that email exists, a password reset link will be sent."
+    });
 
   } catch (error) {
     console.error('Forgot password error:', error);
@@ -112,25 +119,21 @@ authRoutes.post("/forgot-password", async (req, res) => {
   }
 });
 
-// POST /auth/reset-password — Reset password using a valid reset token
+// POST /auth/reset-password — Reset password using valid token
 authRoutes.post("/reset-password", async (req, res) => {
   try {
     const { token, newPassword } = req.body;
 
     if (!token) return res.status(400).json({ error: "Reset token is required" });
     if (!newPassword) return res.status(400).json({ error: "New password is required" });
-    if (newPassword.length < 10) {
-      return res.status(400).json({ error: "New password must be at least 10 characters long" });
+    if (newPassword.length < 12) {
+      return res.status(400).json({ error: "New password must be at least 12 characters" });
     }
 
-    // Hash the provided token to compare with the stored hash
     const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
-
     const [rows] = await db.execute(
-      `SELECT id, email FROM users
-       WHERE password_reset_token = ?
-       AND password_reset_expires > NOW()
-       LIMIT 1`,
+      `SELECT id FROM users
+       WHERE password_reset_token = ? AND password_reset_expires > NOW() LIMIT 1`,
       [hashedToken]
     );
 
@@ -140,22 +143,17 @@ authRoutes.post("/reset-password", async (req, res) => {
       });
     }
 
-    const user = rows[0];
     const newPasswordHash = await bcrypt.hash(newPassword, 12);
-
     await db.execute(
-      `UPDATE users
-       SET password_hash = ?,
-           password_reset_token = NULL,
-           password_reset_expires = NULL
-       WHERE id = ?`,
-      [newPasswordHash, user.id]
+      `UPDATE users SET password_hash = ?, password_reset_token = NULL,
+       password_reset_expires = NULL WHERE id = ?`,
+      [newPasswordHash, rows[0].id]
     );
 
     try {
       await db.execute(
         "INSERT INTO audit_logs (user_id, action, details) VALUES (?, ?, ?)",
-        [user.id, "PASSWORD_RESET_SUCCESS", "Password reset successfully"]
+        [rows[0].id, "PASSWORD_RESET_SUCCESS", "Password reset successfully"]
       );
     } catch (err) {
       console.log('Audit log skipped:', err.message);
@@ -173,25 +171,25 @@ authRoutes.post("/reset-password", async (req, res) => {
 });
 
 // ============================================================================
-// PROTECTED ROUTES — require authentication (JWT)
+// PROTECTED ROUTES
 // ============================================================================
 
-// POST /auth/mfa/begin — Start MFA setup for the authenticated user
+// POST /auth/mfa/begin — Start MFA setup
 authRoutes.post("/mfa/begin", requireAuth, asyncHandler(beginMfaSetup));
 
-// POST /auth/mfa/confirm — Confirm MFA setup by verifying first TOTP token
+// POST /auth/mfa/confirm — Confirm MFA setup, returns recovery codes
 authRoutes.post("/mfa/confirm", requireAuth, asyncHandler(confirmMfaSetup));
 
-// DELETE /auth/mfa — Disable MFA for the authenticated user
+// DELETE /auth/mfa — Disable MFA and delete all recovery codes
 authRoutes.delete("/mfa", requireAuth, asyncHandler(disableMfa));
 
-// GET /auth/profile — Get current user's profile details
+// GET /auth/profile — Get current user's profile
 authRoutes.get("/profile", requireAuth, asyncHandler(getProfile));
 
-// PUT /auth/profile — Update current user's name fields
+// PUT /auth/profile — Update name fields
 authRoutes.put("/profile", requireAuth, asyncHandler(updateProfile));
 
-// PUT /auth/change-email — Change email address (requires current password confirmation)
+// PUT /auth/change-email — Change email (requires password + triggers re-verification)
 authRoutes.put("/change-email", requireAuth, asyncHandler(changeEmail));
 
 // PUT /auth/change-password — Change password (requires current password)

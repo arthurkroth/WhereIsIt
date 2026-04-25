@@ -8,26 +8,25 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Container, Card, Table, Badge, Button,
-  Alert, Spinner, InputGroup, Form
+  Alert, Spinner, InputGroup, Form, Row, Col, Collapse
 } from 'react-bootstrap';
 import { listReceipts } from '../services/api';
 
 /**
  * ReceiptList Page
- * Displays all receipts for the authenticated user.
- * Shows warranty status and allows filtering/searching.
+ * Displays all receipts for the authenticated user with search, filter, and sort.
  *
- * FEATURES:
- * - Lists all receipts with decrypted data
- * - Shows item count per receipt and the first item as a summary
- * - Shows warranty expiry status (active, expiring soon, expired)
- * - Search/filter functionality
- * - Clicking a row navigates to the full receipt detail page
+ * FILTERS:
+ * - Text search: store name or first item description
+ * - Warranty status: All / Active / Expiring Soon / Expired
+ * - Date range: from / to purchase date
+ * - Price range: min / max total price
+ * - Tags: filter by selected tags
  *
- * SECURITY:
- * - Data is decrypted server-side before transmission
- * - Only shows receipts owned by authenticated user (enforced by backend)
- * - XSS protection through React's automatic escaping
+ * SORTING:
+ * - Date (newest / oldest)
+ * - Price (high to low / low to high)
+ * - Store (A–Z / Z–A)
  */
 function ReceiptList() {
   const navigate = useNavigate();
@@ -36,19 +35,20 @@ function ReceiptList() {
   const [filteredReceipts, setFilteredReceipts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+
+  // Filter state
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState('all');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const [priceMin, setPriceMin] = useState('');
+  const [priceMax, setPriceMax] = useState('');
+  const [filterTag, setFilterTag] = useState('');
+  const [sortBy, setSortBy] = useState('date_desc');
+  const [showFilters, setShowFilters] = useState(false);
 
-  /**
-   * Fetches receipts from the backend when the component mounts.
-   */
-  useEffect(() => {
-    fetchReceipts();
-  }, []);
+  useEffect(() => { fetchReceipts(); }, []);
 
-  /**
-   * Fetches all receipts for the authenticated user.
-   */
   const fetchReceipts = async () => {
     setLoading(true);
     setError('');
@@ -56,152 +56,211 @@ function ReceiptList() {
       const response = await listReceipts();
       setReceipts(response.data.receipts || []);
     } catch (err) {
-      setError(err.response?.data?.message || 'Failed to load receipts');
+      setError('Failed to load receipts');
     } finally {
       setLoading(false);
     }
   };
 
-  /**
-   * Applies search and filter whenever receipts, searchTerm, or filterStatus changes.
-   */
+  // Re-apply filters/sort whenever any filter or receipts change
   useEffect(() => {
     let filtered = [...receipts];
 
-    // Apply search filter across store name and first item description
+    // Text search
     if (searchTerm) {
       const term = searchTerm.toLowerCase();
-      filtered = filtered.filter(receipt =>
-        receipt.storeName.toLowerCase().includes(term) ||
-        receipt.firstItemDescription?.toLowerCase().includes(term)
+      filtered = filtered.filter(r =>
+        r.storeName.toLowerCase().includes(term) ||
+        r.firstItemDescription?.toLowerCase().includes(term) ||
+        r.notes?.toLowerCase().includes(term)
       );
     }
 
-    // Apply warranty status filter using the warrantyExpiry field
+    // Warranty status filter
     if (filterStatus !== 'all') {
-      filtered = filtered.filter(receipt => {
-        const status = getWarrantyStatus(receipt.warrantyExpiry);
+      filtered = filtered.filter(r => {
+        const status = getWarrantyStatus(r.warrantyExpiry);
         return status.toLowerCase() === filterStatus;
       });
     }
 
+    // Date range filter
+    if (dateFrom) {
+      filtered = filtered.filter(r => r.purchaseDate && r.purchaseDate >= dateFrom);
+    }
+    if (dateTo) {
+      filtered = filtered.filter(r => r.purchaseDate && r.purchaseDate <= dateTo);
+    }
+
+    // Price range filter
+    if (priceMin !== '') {
+      filtered = filtered.filter(r => parseFloat(r.totalPrice) >= parseFloat(priceMin));
+    }
+    if (priceMax !== '') {
+      filtered = filtered.filter(r => parseFloat(r.totalPrice) <= parseFloat(priceMax));
+    }
+
+    // Tag filter
+    if (filterTag) {
+      filtered = filtered.filter(r => Array.isArray(r.tags) && r.tags.includes(filterTag));
+    }
+
+    // Sorting
+    filtered.sort((a, b) => {
+      switch (sortBy) {
+        case 'date_desc': return new Date(b.purchaseDate) - new Date(a.purchaseDate);
+        case 'date_asc':  return new Date(a.purchaseDate) - new Date(b.purchaseDate);
+        case 'price_desc': return parseFloat(b.totalPrice || 0) - parseFloat(a.totalPrice || 0);
+        case 'price_asc':  return parseFloat(a.totalPrice || 0) - parseFloat(b.totalPrice || 0);
+        case 'store_asc':  return a.storeName.localeCompare(b.storeName);
+        case 'store_desc': return b.storeName.localeCompare(a.storeName);
+        default: return 0;
+      }
+    });
+
     setFilteredReceipts(filtered);
-  }, [receipts, searchTerm, filterStatus]);
+  }, [receipts, searchTerm, filterStatus, dateFrom, dateTo, priceMin, priceMax, filterTag, sortBy]);
 
   /**
-   * Determines warranty status based on expiry date.
-   * @param {string} expiryDate - Warranty expiry date (YYYY-MM-DD)
-   * @returns {string} Status: 'Active', 'Expiring Soon', or 'Expired'
+   * Collects all unique tags across all receipts for the tag filter dropdown.
    */
+  const allTags = [...new Set(receipts.flatMap(r => Array.isArray(r.tags) ? r.tags : []))].sort();
+
   const getWarrantyStatus = (expiryDate) => {
     const today = new Date();
     const expiry = new Date(expiryDate);
-    const daysUntilExpiry = Math.ceil((expiry - today) / (1000 * 60 * 60 * 24));
-
-    if (daysUntilExpiry < 0) return 'Expired';
-    if (daysUntilExpiry <= 30) return 'Expiring Soon';
+    const daysLeft = Math.ceil((expiry - today) / (1000 * 60 * 60 * 24));
+    if (daysLeft < 0) return 'Expired';
+    if (daysLeft <= 30) return 'Expiring Soon';
     return 'Active';
   };
 
-  /**
-   * Returns the Bootstrap Badge variant for a given warranty status.
-   * @param {string} status - Warranty status string
-   * @returns {string} Bootstrap variant name
-   */
   const getStatusBadgeVariant = (status) => {
-    switch (status) {
-      case 'Active':        return 'success';
-      case 'Expiring Soon': return 'warning';
-      case 'Expired':       return 'danger';
-      default:              return 'secondary';
-    }
+    if (status === 'Active') return 'success';
+    if (status === 'Expiring Soon') return 'warning';
+    if (status === 'Expired') return 'danger';
+    return 'secondary';
   };
 
-  /**
-   * Formats a date string for human-readable display.
-   * @param {string} dateString - Date in YYYY-MM-DD format
-   * @returns {string} Formatted date e.g. "2 Feb 2026"
-   */
   const formatDate = (dateString) => {
     if (!dateString) return 'N/A';
     const date = new Date(dateString);
     if (isNaN(date.getTime())) return 'N/A';
-    return date.toLocaleDateString('en-GB', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-    });
+    return date.toLocaleDateString('en-GB', { year: 'numeric', month: 'short', day: 'numeric' });
+  };
+
+  const formatCurrency = (amount) => {
+    const parsed = parseFloat(amount);
+    return isNaN(parsed) ? '€0.00' : `€${parsed.toFixed(2)}`;
   };
 
   /**
-   * Formats a number as a Euro currency string.
-   * @param {number} amount - Amount to format
-   * @returns {string} Formatted currency e.g. "€49.99"
+   * Resets all filter and sort controls to their default values.
    */
-  const formatCurrency = (amount) => {
-    const parsed = parseFloat(amount);
-    if (isNaN(parsed)) return '€0.00';
-    return `€${parsed.toFixed(2)}`;
+  const handleClearFilters = () => {
+    setSearchTerm('');
+    setFilterStatus('all');
+    setDateFrom('');
+    setDateTo('');
+    setPriceMin('');
+    setPriceMax('');
+    setFilterTag('');
+    setSortBy('date_desc');
   };
 
+  const hasActiveFilters = searchTerm || filterStatus !== 'all' || dateFrom || dateTo ||
+    priceMin !== '' || priceMax !== '' || filterTag || sortBy !== 'date_desc';
+
   return (
-    <Container className="mt-4">
+    <Container className="mt-0">
       <div className="d-flex justify-content-between align-items-center mb-4">
         <h2>My Receipts</h2>
         <div>
-          <Button
-            variant="primary"
-            className="me-2"
-            onClick={() => navigate('/receipt/upload')}
-          >
-            Upload Receipt
-          </Button>
-          <Button
-            variant="outline-primary"
-            onClick={() => navigate('/receipt/manual')}
-          >
-            Add Manually
-          </Button>
+          <Button variant="primary" className="me-2" onClick={() => navigate('/receipt/upload')}>Upload Receipt</Button>
+          <Button variant="outline-primary" onClick={() => navigate('/receipt/manual')}>Add Manually</Button>
         </div>
       </div>
 
-      {error && (
-        <Alert variant="danger" onClose={() => setError('')} dismissible>
-          {error}
-        </Alert>
-      )}
+      {error && <Alert variant="danger" onClose={() => setError('')} dismissible>{error}</Alert>}
 
-      {/* Search and Filter Controls */}
+      {/* Search, sort, and filter bar */}
       <Card className="mb-4">
         <Card.Body>
-          <div className="row g-3">
-            <div className="col-md-8">
+          <Row className="g-2 align-items-end">
+            <Col md={5}>
               <InputGroup>
-                <Form.Control
-                  type="text"
-                  placeholder="Search by store or product..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                />
-                {searchTerm && (
-                  <Button variant="outline-secondary" onClick={() => setSearchTerm('')}>
-                    Clear
-                  </Button>
-                )}
+                <Form.Control type="text" placeholder="Search by store, product, or notes..."
+                  value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+                {searchTerm && <Button variant="outline-secondary" onClick={() => setSearchTerm('')}>✕</Button>}
               </InputGroup>
-            </div>
-            <div className="col-md-4">
-              <Form.Select
-                value={filterStatus}
-                onChange={(e) => setFilterStatus(e.target.value)}
-              >
-                <option value="all">All Warranties</option>
-                <option value="active">Active</option>
-                <option value="expiring soon">Expiring Soon</option>
-                <option value="expired">Expired</option>
+            </Col>
+            <Col md={3}>
+              <Form.Select value={sortBy} onChange={(e) => setSortBy(e.target.value)}>
+                <option value="date_desc">Date: Newest first</option>
+                <option value="date_asc">Date: Oldest first</option>
+                <option value="price_desc">Price: High to Low</option>
+                <option value="price_asc">Price: Low to High</option>
+                <option value="store_asc">Store: A–Z</option>
+                <option value="store_desc">Store: Z–A</option>
               </Form.Select>
+            </Col>
+            <Col md={2}>
+              <Button variant="outline-secondary" className="w-100"
+                onClick={() => setShowFilters(!showFilters)}>
+                {showFilters ? 'Hide Filters' : 'Show Filters'}
+                {hasActiveFilters && <Badge bg="primary" className="ms-2">!</Badge>}
+              </Button>
+            </Col>
+            <Col md={2}>
+              {hasActiveFilters && (
+                <Button variant="outline-danger" className="w-100" onClick={handleClearFilters}>
+                  Clear All
+                </Button>
+              )}
+            </Col>
+          </Row>
+
+          {/* Expandable advanced filters */}
+          <Collapse in={showFilters}>
+            <div className="mt-3 pt-3 border-top">
+              <Row className="g-3">
+                <Col md={3}>
+                  <Form.Label className="small fw-semibold">Warranty Status</Form.Label>
+                  <Form.Select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
+                    <option value="all">All</option>
+                    <option value="active">Active</option>
+                    <option value="expiring soon">Expiring Soon</option>
+                    <option value="expired">Expired</option>
+                  </Form.Select>
+                </Col>
+                <Col md={3}>
+                  <Form.Label className="small fw-semibold">Date From</Form.Label>
+                  <Form.Control type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
+                </Col>
+                <Col md={3}>
+                  <Form.Label className="small fw-semibold">Date To</Form.Label>
+                  <Form.Control type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
+                </Col>
+                <Col md={3}>
+                  <Form.Label className="small fw-semibold">Tag</Form.Label>
+                  <Form.Select value={filterTag} onChange={(e) => setFilterTag(e.target.value)}>
+                    <option value="">All Tags</option>
+                    {allTags.map(tag => <option key={tag} value={tag}>{tag}</option>)}
+                  </Form.Select>
+                </Col>
+                <Col md={3}>
+                  <Form.Label className="small fw-semibold">Min Price (€)</Form.Label>
+                  <Form.Control type="number" min="0" step="0.01" placeholder="0.00"
+                    value={priceMin} onChange={(e) => setPriceMin(e.target.value)} />
+                </Col>
+                <Col md={3}>
+                  <Form.Label className="small fw-semibold">Max Price (€)</Form.Label>
+                  <Form.Control type="number" min="0" step="0.01" placeholder="No limit"
+                    value={priceMax} onChange={(e) => setPriceMax(e.target.value)} />
+                </Col>
+              </Row>
             </div>
-          </div>
+          </Collapse>
         </Card.Body>
       </Card>
 
@@ -213,30 +272,20 @@ function ReceiptList() {
       ) : filteredReceipts.length === 0 ? (
         <Card>
           <Card.Body className="text-center py-5">
-            <h4 className="mt-3">
-              {receipts.length === 0 ? 'No receipts yet' : 'No matching receipts'}
-            </h4>
+            <h4>{receipts.length === 0 ? 'No receipts yet' : 'No matching receipts'}</h4>
             <p className="text-muted">
               {receipts.length === 0
                 ? 'Upload your first receipt to get started!'
-                : 'Try adjusting your search or filter criteria'}
+                : 'Try adjusting your search or filter criteria.'}
             </p>
             {receipts.length === 0 && (
               <div className="mt-3">
-                <Button
-                  variant="primary"
-                  className="me-2"
-                  onClick={() => navigate('/receipt/upload')}
-                >
-                  Upload Receipt
-                </Button>
-                <Button
-                  variant="outline-primary"
-                  onClick={() => navigate('/receipt/manual')}
-                >
-                  Add Manually
-                </Button>
+                <Button variant="primary" className="me-2" onClick={() => navigate('/receipt/upload')}>Upload Receipt</Button>
+                <Button variant="outline-primary" onClick={() => navigate('/receipt/manual')}>Add Manually</Button>
               </div>
+            )}
+            {hasActiveFilters && (
+              <Button variant="outline-secondary" className="mt-2" onClick={handleClearFilters}>Clear Filters</Button>
             )}
           </Card.Body>
         </Card>
@@ -249,6 +298,7 @@ function ReceiptList() {
                   <tr>
                     <th>Store</th>
                     <th>Items</th>
+                    <th>Tags</th>
                     <th>Purchase Date</th>
                     <th>Total</th>
                     <th>Warranty</th>
@@ -259,36 +309,32 @@ function ReceiptList() {
                   {filteredReceipts.map((receipt) => {
                     const status = getWarrantyStatus(receipt.warrantyExpiry);
                     return (
-                      <tr
-                        key={receipt.id}
-                        onClick={() => navigate(`/receipts/${receipt.id}`)}
-                        style={{ cursor: 'pointer' }}
-                      >
+                      <tr key={receipt.id} onClick={() => navigate(`/receipts/${receipt.id}`)}
+                        style={{ cursor: 'pointer' }}>
+                        <td><strong>{receipt.storeName}</strong></td>
                         <td>
-                          <strong>{receipt.storeName}</strong>
-                        </td>
-                        <td>
-                          {/* Show the first item as a summary and a count if there are more */}
                           <div>{receipt.firstItemDescription}</div>
                           {receipt.itemCount > 1 && (
-                            <small className="text-muted">
-                              +{receipt.itemCount - 1} more item{receipt.itemCount - 1 > 1 ? 's' : ''}
-                            </small>
+                            <small className="text-muted">+{receipt.itemCount - 1} more item{receipt.itemCount - 1 > 1 ? 's' : ''}</small>
                           )}
+                        </td>
+                        <td>
+                          <div className="d-flex flex-wrap gap-1">
+                            {receipt.tags?.length > 0
+                              ? receipt.tags.map(tag => (
+                                <span key={tag} className="badge rounded-pill bg-light text-dark border"
+                                  style={{ fontSize: '0.75rem' }}>{tag}</span>
+                              ))
+                              : <span className="text-muted small">—</span>}
+                          </div>
                         </td>
                         <td>{formatDate(receipt.purchaseDate)}</td>
                         <td>{formatCurrency(receipt.totalPrice)}</td>
                         <td>
                           <div>{receipt.warrantyMonths} months</div>
-                          <small className="text-muted">
-                            Expires: {formatDate(receipt.warrantyExpiry)}
-                          </small>
+                          <small className="text-muted">Expires: {formatDate(receipt.warrantyExpiry)}</small>
                         </td>
-                        <td>
-                          <Badge bg={getStatusBadgeVariant(status)}>
-                            {status}
-                          </Badge>
-                        </td>
+                        <td><Badge bg={getStatusBadgeVariant(status)}>{status}</Badge></td>
                       </tr>
                     );
                   })}

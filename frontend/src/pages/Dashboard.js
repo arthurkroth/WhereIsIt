@@ -5,274 +5,319 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Container, Row, Col, Card, Alert, Spinner, Button } from 'react-bootstrap';
-import { Link } from 'react-router-dom';
-import { useAuth } from '../context/AuthContext';
+import { useNavigate, Link } from 'react-router-dom';
+import {
+  Container, Row, Col, Card, Badge, Button,
+  Alert, Spinner, ProgressBar
+} from 'react-bootstrap';
 import { listReceipts } from '../services/api';
+import { useAuth } from '../context/AuthContext';
 
 /**
- * Dashboard page component.
- * Shows a personalised welcome message and receipt overview.
+ * Dashboard Page
+ * Shows an overview of the user's receipts, warranty status, and storage usage.
  *
- * FEATURES:
- * - Personalised greeting using the user's first name
- * - Summary statistics (total receipts, active/expired warranties, total value)
- * - Recent receipts with warranty status
- * - Quick action buttons
- *
- * NOTE ON FIELD NAMES:
- * Since moving to the multi-item receipt structure, receipts no longer have
- * a single 'price' or 'productDescription' field. The correct fields are:
- * - receipt.totalPrice     (the total price of the whole receipt)
- * - receipt.firstItemDescription  (summary of the first item for display)
+ * SECTIONS:
+ * - Storage usage bar (FREE tier only) with upgrade prompt when approaching limit
+ * - Warranty alerts: receipts expiring within 30 days
+ * - Summary stats: total receipts, active warranties, expiring soon, expired
+ * - Recent receipts: last 5 receipts as clickable cards
  */
-const Dashboard = () => {
+function Dashboard() {
+  const navigate = useNavigate();
   const { user } = useAuth();
+
   const [receipts, setReceipts] = useState([]);
+  const [storageInfo, setStorageInfo] = useState(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
-  /**
-   * Fetches user receipts on component mount.
-   */
-  useEffect(() => {
-    fetchReceipts();
-  }, []);
+  useEffect(() => { fetchReceipts(); }, []);
 
   /**
-   * Fetches all receipts for the current user from the backend.
+   * Fetches all receipts and storage info from the backend.
    */
   const fetchReceipts = async () => {
+    setLoading(true);
+    setError('');
     try {
       const response = await listReceipts();
       setReceipts(response.data.receipts || []);
+      setStorageInfo(response.data.storageInfo || null);
     } catch (err) {
-      setError('Failed to load receipts');
-      console.error('Error fetching receipts:', err);
+      setError('Failed to load dashboard data. Please refresh the page.');
     } finally {
       setLoading(false);
     }
   };
 
   /**
-   * Calculates warranty status for a receipt based on its expiry date.
-   * @param {string} warrantyExpiry - Expiry date (YYYY-MM-DD)
-   * @returns {Object} Status object with Bootstrap variant and display text
+   * Determines the warranty status of a receipt based on its expiry date.
+   * @param {string} expiryDate - ISO date string
+   * @returns {string} 'Active' | 'Expiring Soon' | 'Expired'
    */
-  const getWarrantyStatus = (warrantyExpiry) => {
+  const getWarrantyStatus = (expiryDate) => {
     const today = new Date();
-    const expiryDate = new Date(warrantyExpiry);
-    const daysUntilExpiry = Math.floor((expiryDate - today) / (1000 * 60 * 60 * 24));
-
-    if (daysUntilExpiry < 0) {
-      return { variant: 'danger', text: 'Expired' };
-    } else if (daysUntilExpiry <= 30) {
-      return { variant: 'warning', text: `Expires in ${daysUntilExpiry} days` };
-    } else {
-      return { variant: 'success', text: 'Active' };
-    }
+    const expiry = new Date(expiryDate);
+    const daysLeft = Math.ceil((expiry - today) / (1000 * 60 * 60 * 24));
+    if (daysLeft < 0) return 'Expired';
+    if (daysLeft <= 30) return 'Expiring Soon';
+    return 'Active';
   };
 
   /**
-   * Formats a date string for display, handling invalid dates gracefully.
-   * @param {string} dateString - Date string to format
-   * @returns {string} Formatted date or 'N/A'
+   * Returns the number of days remaining until warranty expiry.
+   * Negative value means already expired.
+   * @param {string} expiryDate
+   * @returns {number}
    */
+  const getDaysLeft = (expiryDate) => {
+    const today = new Date();
+    const expiry = new Date(expiryDate);
+    return Math.ceil((expiry - today) / (1000 * 60 * 60 * 24));
+  };
+
+  const getStatusBadgeVariant = (status) => {
+    if (status === 'Active') return 'success';
+    if (status === 'Expiring Soon') return 'warning';
+    if (status === 'Expired') return 'danger';
+    return 'secondary';
+  };
+
   const formatDate = (dateString) => {
     if (!dateString) return 'N/A';
     const date = new Date(dateString);
     if (isNaN(date.getTime())) return 'N/A';
-    return date.toLocaleDateString('en-GB', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-    });
+    return date.toLocaleDateString('en-GB', { year: 'numeric', month: 'short', day: 'numeric' });
   };
 
-  /**
-   * Calculates summary statistics from the receipts list.
-   *
-   * Total value uses receipt.totalPrice (the total for the whole receipt),
-   * not individual item prices, to avoid double-counting.
-   *
-   * @returns {Object} Stats with total, active, expired, totalValue
-   */
-  const getStatistics = () => {
-    const total = receipts.length;
-
-    const active = receipts.filter((r) => {
-      const expiryDate = new Date(r.warrantyExpiry);
-      return expiryDate > new Date();
-    }).length;
-
-    const expired = total - active;
-
-    // Use totalPrice (sum of all items on the receipt) not individual item price
-    const totalValue = receipts.reduce((sum, r) => {
-      const price = parseFloat(r.totalPrice);
-      return sum + (isNaN(price) ? 0 : price);
-    }, 0);
-
-    return { total, active, expired, totalValue };
+  const formatCurrency = (amount) => {
+    const parsed = parseFloat(amount);
+    return isNaN(parsed) ? '€0.00' : `€${parsed.toFixed(2)}`;
   };
 
-  const stats = getStatistics();
+  // Compute summary stats
+  const activeCount = receipts.filter(r => getWarrantyStatus(r.warrantyExpiry) === 'Active').length;
+  const expiringSoonCount = receipts.filter(r => getWarrantyStatus(r.warrantyExpiry) === 'Expiring Soon').length;
+  const expiredCount = receipts.filter(r => getWarrantyStatus(r.warrantyExpiry) === 'Expired').length;
+
+  // Receipts expiring within 30 days (for the warning banner)
+  const expiringReceipts = receipts.filter(r => {
+    const days = getDaysLeft(r.warrantyExpiry);
+    return days >= 0 && days <= 30;
+  });
+
+  // Most recent 5 receipts
+  const recentReceipts = [...receipts]
+    .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
+    .slice(0, 5);
+
+  // Storage bar colour: green → yellow → red as usage approaches limit
+  const getStorageBarVariant = (used, limit) => {
+    const pct = (used / limit) * 100;
+    if (pct >= 90) return 'danger';
+    if (pct >= 70) return 'warning';
+    return 'success';
+  };
 
   if (loading) {
     return (
-      <Container>
-        <div className="text-center mt-5">
-          <Spinner animation="border" role="status">
-            <span className="visually-hidden">Loading...</span>
-          </Spinner>
-        </div>
+      <Container className="mt-0 text-center py-5">
+        <Spinner animation="border" variant="primary" />
+        <p className="mt-3 text-muted">Loading dashboard...</p>
       </Container>
     );
   }
 
-  return (
-    <Container>
-      <h1 className="mb-4">Dashboard</h1>
+  const firstName = user?.firstName || 'there';
 
-      {error && (
-        <Alert variant="danger" dismissible onClose={() => setError('')}>
-          {error}
+  return (
+    <Container className="mt-0">
+
+      {/* Page header */}
+      <div className="d-flex justify-content-between align-items-center mb-4">
+        <h2 className="mb-0">Welcome back, {firstName}!</h2>
+        <div>
+          <Button variant="primary" className="me-2" onClick={() => navigate('/receipt/upload')}>
+            Upload Receipt
+          </Button>
+          <Button variant="outline-primary" onClick={() => navigate('/receipt/manual')}>
+            Add Manually
+          </Button>
+        </div>
+      </div>
+
+      {error && <Alert variant="danger" onClose={() => setError('')} dismissible>{error}</Alert>}
+
+      {/* FREE tier storage usage bar */}
+      {storageInfo?.isLimited && (
+        <Card className="mb-4">
+          <Card.Body>
+            <div className="d-flex justify-content-between align-items-center mb-2">
+              <span className="fw-semibold">Storage Usage</span>
+              <span className="text-muted small">
+                {storageInfo.used} / {storageInfo.limit} receipts
+              </span>
+            </div>
+            <ProgressBar
+              now={(storageInfo.used / storageInfo.limit) * 100}
+              variant={getStorageBarVariant(storageInfo.used, storageInfo.limit)}
+              style={{ height: '10px' }}
+            />
+
+            {/* Approaching limit: warn at 80% */}
+            {storageInfo.used >= Math.floor(storageInfo.limit * 0.8) && storageInfo.used < storageInfo.limit && (
+              <Alert variant="warning" className="mt-3 mb-0">
+                You have used <strong>{storageInfo.used} of {storageInfo.limit}</strong> receipts.
+                Upgrade to Premium for unlimited storage.
+              </Alert>
+            )}
+
+            {/* At limit */}
+            {storageInfo.used >= storageInfo.limit && (
+              <Alert variant="danger" className="mt-3 mb-0">
+                <strong>Storage limit reached.</strong> You cannot add more receipts on the Free tier.
+                Delete old receipts or upgrade to Premium for unlimited storage.
+              </Alert>
+            )}
+          </Card.Body>
+        </Card>
+      )}
+
+      {/* Warranty expiry warning banner */}
+      {expiringReceipts.length > 0 && (
+        <Alert variant="warning" className="mb-4">
+          <strong>⚠ Warranty Alert:</strong>{' '}
+          {expiringReceipts.length === 1
+            ? <>1 receipt (<strong>{expiringReceipts[0].storeName}</strong>) has a warranty expiring within 30 days.</>
+            : <>{expiringReceipts.length} receipts have warranties expiring within 30 days.</>
+          }
+          {' '}<Link to="/receipts?filter=expiring">View expiring warranties →</Link>
         </Alert>
       )}
 
-      {/* Personalised Welcome Card - greets user by first name */}
-      <Card className="mb-4">
-        <Card.Body>
-          <h3>
-            Welcome back, {user?.firstName ? user.firstName : 'there'}!
-          </h3>
-          <p className="mb-0 text-muted">
-            Account Type: <strong>{user?.role}</strong>
-          </p>
-        </Card.Body>
-      </Card>
-
-      {/* Statistics Cards */}
-      <Row className="mb-4">
-        <Col md={3}>
-          <Card className="text-center">
+      {/* Summary stats row */}
+      <Row className="mb-4 g-3">
+        <Col xs={6} md={3}>
+          <Card className="text-center h-100">
             <Card.Body>
-              <h2>{stats.total}</h2>
-              <p className="mb-0">Total Receipts</p>
+              <div className="display-6 fw-bold text-primary">{receipts.length}</div>
+              <div className="text-muted small mt-1">Total Receipts</div>
             </Card.Body>
           </Card>
         </Col>
-        <Col md={3}>
-          <Card className="text-center">
+        <Col xs={6} md={3}>
+          <Card className="text-center h-100 border-success">
             <Card.Body>
-              <h2 className="text-success">{stats.active}</h2>
-              <p className="mb-0">Active Warranties</p>
+              <div className="display-6 fw-bold text-success">{activeCount}</div>
+              <div className="text-muted small mt-1">Active Warranties</div>
             </Card.Body>
           </Card>
         </Col>
-        <Col md={3}>
-          <Card className="text-center">
+        <Col xs={6} md={3}>
+          <Card className="text-center h-100 border-warning">
             <Card.Body>
-              <h2 className="text-danger">{stats.expired}</h2>
-              <p className="mb-0">Expired Warranties</p>
+              <div className="display-6 fw-bold text-warning">{expiringSoonCount}</div>
+              <div className="text-muted small mt-1">Expiring Soon</div>
             </Card.Body>
           </Card>
         </Col>
-        <Col md={3}>
-          <Card className="text-center">
+        <Col xs={6} md={3}>
+          <Card className="text-center h-100 border-danger">
             <Card.Body>
-              <h2>€{stats.totalValue.toFixed(2)}</h2>
-              <p className="mb-0">Total Value</p>
+              <div className="display-6 fw-bold text-danger">{expiredCount}</div>
+              <div className="text-muted small mt-1">Expired</div>
             </Card.Body>
           </Card>
         </Col>
       </Row>
 
-      {/* Quick Actions */}
-      <Card className="mb-4">
-        <Card.Body>
-          <h5>Quick Actions</h5>
-          <div className="d-flex gap-2">
-            <Button as={Link} to="/receipt/upload" variant="primary">
-              Upload Receipt
-            </Button>
-            <Button as={Link} to="/receipt/manual" variant="outline-primary">
-              Add Manually
-            </Button>
-            <Button as={Link} to="/receipts" variant="secondary">
-              View All Receipts
-            </Button>
-            <Button as={Link} to="/mfa-setup" variant="outline-secondary">
-              Setup MFA
-            </Button>
-          </div>
+      {/* Recent receipts */}
+      <Card>
+        <Card.Header className="d-flex justify-content-between align-items-center">
+          <strong>Recent Receipts</strong>
+          <Button variant="link" size="sm" onClick={() => navigate('/receipts')}>
+            View All →
+          </Button>
+        </Card.Header>
+        <Card.Body className="p-0">
+          {receipts.length === 0 ? (
+            <div className="text-center py-5">
+              <p className="text-muted mb-3">No receipts yet. Add your first one!</p>
+              <Button variant="primary" className="me-2" onClick={() => navigate('/receipt/upload')}>
+                Upload Receipt
+              </Button>
+              <Button variant="outline-primary" onClick={() => navigate('/receipt/manual')}>
+                Add Manually
+              </Button>
+            </div>
+          ) : (
+            <Row className="g-3 p-3">
+              {recentReceipts.map(receipt => {
+                const status = getWarrantyStatus(receipt.warrantyExpiry);
+                const daysLeft = getDaysLeft(receipt.warrantyExpiry);
+                return (
+                  <Col key={receipt.id} xs={12} md={6} lg={4}>
+                    <Card
+                      className="h-100"
+                      onClick={() => navigate(`/receipts/${receipt.id}`)}
+                      style={{ cursor: 'pointer', transition: 'box-shadow 0.2s ease' }}
+                      onMouseEnter={e => e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.1)'}
+                      onMouseLeave={e => e.currentTarget.style.boxShadow = 'none'}
+                    >
+                      <Card.Body>
+                      <div className="d-flex justify-content-between align-items-center mb-1">
+                        <Card.Title className="fs-6 mb-0 text-truncate me-2">{receipt.storeName}</Card.Title>
+                        <Badge bg={getStatusBadgeVariant(status)} className="flex-shrink-0">
+                          {status}
+                        </Badge>
+                      </div>
+
+                      <Card.Subtitle className="mb-2 text-muted" style={{ fontSize: '0.82rem' }}>
+                        {receipt.firstItemDescription || 'No items'}
+                        {receipt.itemCount > 1 && ` +${receipt.itemCount - 1} more`}
+                      </Card.Subtitle>
+
+                        {/* Tags */}
+                        {receipt.tags?.length > 0 && (
+                          <div className="d-flex flex-wrap gap-1 mb-2">
+                            {receipt.tags.map(tag => (
+                              <span key={tag} className="badge rounded-pill bg-light text-dark border"
+                                style={{ fontSize: '0.7rem' }}>{tag}</span>
+                            ))}
+                          </div>
+                        )}
+
+                        <div className="d-flex justify-content-between align-items-center mt-2">
+                          <small className="text-muted">{formatDate(receipt.purchaseDate)}</small>
+                          <strong>{formatCurrency(receipt.totalPrice)}</strong>
+                        </div>
+
+                        {/* Warranty expiry countdown */}
+                        {status === 'Expiring Soon' && (
+                          <div className="mt-2">
+                            <small className="text-warning fw-semibold">
+                              ⚠ Expires in {daysLeft} day{daysLeft !== 1 ? 's' : ''}
+                            </small>
+                          </div>
+                        )}
+                        {status === 'Expired' && (
+                          <div className="mt-2">
+                            <small className="text-danger">Warranty expired {Math.abs(daysLeft)} day{Math.abs(daysLeft) !== 1 ? 's' : ''} ago</small>
+                          </div>
+                        )}
+                      </Card.Body>
+                    </Card>
+                  </Col>
+                );
+              })}
+            </Row>
+          )}
         </Card.Body>
       </Card>
 
-      {/* Recent Receipts */}
-      <h4 className="mb-3">Recent Receipts</h4>
-      {receipts.length === 0 ? (
-        <Alert variant="info">
-          You haven't added any receipts yet.{' '}
-          <Link to="/receipt/upload">Upload your first receipt</Link> to get started!
-        </Alert>
-      ) : (
-        <Row>
-          {receipts.slice(0, 6).map((receipt) => {
-            const warrantyStatus = getWarrantyStatus(receipt.warrantyExpiry);
-            return (
-              <Col md={6} lg={4} key={receipt.id}>
-              <Card
-                className="mb-3"
-                as={Link}
-                to={`/receipts/${receipt.id}`}
-                style={{ cursor: 'pointer', textDecoration: 'none', color: 'inherit' }}
-              >
-                  <Card.Body>
-                    {/* Show the first item description as a summary */}
-                    <Card.Title className="fs-6">
-                      {receipt.firstItemDescription || 'No items'}
-                      {receipt.itemCount > 1 && (
-                        <span className="text-muted fw-normal fs-6">
-                          {' '}+{receipt.itemCount - 1} more
-                        </span>
-                      )}
-                    </Card.Title>
-                    <Card.Subtitle className="mb-2 text-muted">
-                      {receipt.storeName}
-                    </Card.Subtitle>
-                    <Card.Text>
-                      <small>
-                        <strong>Purchase Date:</strong> {formatDate(receipt.purchaseDate)}
-                        <br />
-                        {/* totalPrice is the sum of all items on this receipt */}
-                        <strong>Price:</strong> €{parseFloat(receipt.totalPrice || 0).toFixed(2)}
-                        <br />
-                        <strong>Warranty:</strong> {receipt.warrantyMonths} months
-                        <br />
-                        <strong>Expires:</strong> {formatDate(receipt.warrantyExpiry)}
-                      </small>
-                    </Card.Text>
-                    <Alert variant={warrantyStatus.variant} className="mb-0 py-1">
-                      <small>{warrantyStatus.text}</small>
-                    </Alert>
-                  </Card.Body>
-                </Card>
-              </Col>
-            );
-          })}
-        </Row>
-      )}
-
-      {receipts.length > 6 && (
-        <div className="text-center mt-3">
-          <Button as={Link} to="/receipts" variant="outline-primary">
-            View All {receipts.length} Receipts
-          </Button>
-        </div>
-      )}
     </Container>
   );
-};
+}
 
 export default Dashboard;
