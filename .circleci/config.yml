@@ -1,61 +1,88 @@
 # =============================================================================
-# WhereIsIt? — CircleCI Pipeline Configuration
+# WhereIsIt? - CircleCI Pipeline Configuration
 # Author: Arthur Kroth - x22166971
 #
 # This pipeline runs automatically on every push to the dev branch.
 # It performs two parallel jobs:
 #
-#   1. backend-checks — installs dependencies, runs a security audit,
+#   1. backend-checks - installs dependencies, runs a security audit,
 #      and verifies the backend modules load without errors
 #
-#   2. frontend-checks — installs dependencies, runs a security audit,
+#   2. frontend-checks - installs dependencies, runs a security audit,
 #      and builds the React app to catch any compilation errors
 #
 # Both jobs must pass before a merge to main is considered safe.
+#
+# NOTE: This config uses plain `npm install` rather than `npm ci`.
+# `npm ci` requires a committed package-lock.json that is perfectly in sync
+# with package.json. `npm install` is more forgiving and works correctly
+# even when the lock file is absent or was generated on a different OS.
 # =============================================================================
 
 version: 2.1
 
-# CircleCI orbs are reusable packages that simplify common tasks.
-# The node orb handles Node.js setup and dependency caching for us.
+# =============================================================================
+# ORBS
+# CircleCI orbs are reusable packages that simplify common pipeline tasks.
+# We declare the node orb here but only use it for its Docker image - all
+# install steps are handled manually below with plain npm install commands.
+# =============================================================================
 orbs:
   node: circleci/node@5.2.0
 
 # =============================================================================
 # JOBS
+# Each job runs in its own isolated Docker container.
+# Jobs declared in the same workflow run in PARALLEL by default,
+# which keeps the total pipeline time as short as possible.
 # =============================================================================
 jobs:
 
   # ---------------------------------------------------------------------------
-  # Job 1: Backend Checks
-  # Runs inside a Node.js 20 Docker container (Linux).
+  # JOB 1: Backend Checks
+  # Runs inside a Node.js 20 LTS Docker container on Linux (Ubuntu).
+  # This mirrors a typical production/deployment environment.
   # ---------------------------------------------------------------------------
   backend-checks:
     docker:
-      - image: cimg/node:20.18
+      - image: cimg/node:20.18  # Official CircleCI Node.js 20 image
+
     steps:
+      # Checkout - pulls the repository code into the container at the
+      # current commit that triggered this pipeline run.
       - checkout
 
-      # Install backend dependencies using the node orb.
-      # The orb automatically caches node_modules between runs
-      # to speed up subsequent pipeline executions.
-      - node/install-packages:
-          pkg-manager: npm
-          app-dir: backend
+      # Install backend dependencies.
+      # Uses `npm install` (not `npm ci`) so it works regardless of whether
+      # a package-lock.json is present or was generated on a different OS.
+      # All packages listed in backend/package.json are installed here,
+      # including bcryptjs, nodemailer, tesseract.js, zod, express, etc.
+      - run:
+          name: Install backend dependencies
+          command: cd backend && npm install
 
-      # Security audit — checks all backend dependencies for known
-      # vulnerabilities using the npm advisory database.
-      # This is especially important for a cybersecurity project.
-      # --audit-level=high means only high/critical issues fail the build.
+      # Security audit - scans all installed backend packages against the
+      # npm vulnerability advisory database to detect known CVEs.
+      # --audit-level=high means the job only fails for HIGH or CRITICAL
+      # severity issues. Low/moderate findings are reported but do not
+      # block the pipeline. The `|| true` ensures the job continues even
+      # if vulnerabilities are found, so we see the full audit report.
+      # This check is especially important given the cybersecurity focus
+      # of this project - dependencies are a major attack surface.
       - run:
           name: Security audit (backend)
-          command: |
-            cd backend
-            npm audit --audit-level=high || true
+          command: cd backend && npm audit --audit-level=high || true
 
-      # Module load check — attempts to require the core application
-      # modules to catch any missing imports or syntax errors without
-      # needing a running database or full test suite.
+      # Module load check - attempts to require the three most critical
+      # backend modules to catch any missing imports, broken requires,
+      # or syntax errors without needing a running database or full test suite.
+      # If any of these fail to load, the job exits with a non-zero code
+      # and the pipeline is marked as failed.
+      #
+      # Modules checked:
+      #   - authValidation.js  - Zod schemas for all auth endpoints
+      #   - encryptionService.js - AES-256-GCM encryption/decryption
+      #   - ocrService.js      - Tesseract OCR and PDF parsing logic
       - run:
           name: Verify backend modules load
           command: |
@@ -68,38 +95,50 @@ jobs:
             "
 
   # ---------------------------------------------------------------------------
-  # Job 2: Frontend Checks
-  # Runs inside a Node.js 20 Docker container (Linux).
+  # JOB 2: Frontend Checks
+  # Runs inside a Node.js 20 LTS Docker container on Linux (Ubuntu).
   # ---------------------------------------------------------------------------
   frontend-checks:
     docker:
-      - image: cimg/node:20.18
+      - image: cimg/node:20.18  # Official CircleCI Node.js 20 image
+
     steps:
+      # Checkout - pulls the repository code into the container.
       - checkout
 
-      # Install frontend dependencies with caching
-      - node/install-packages:
-          pkg-manager: npm
-          app-dir: frontend
+      # Install frontend dependencies.
+      # Installs all packages listed in frontend/package.json including
+      # React, React Router, React Bootstrap, Axios, qrcode.react, etc.
+      # Uses `npm install` for the same reason as the backend job above.
+      - run:
+          name: Install frontend dependencies
+          command: cd frontend && npm install
 
-      # Security audit — checks all frontend dependencies for known vulnerabilities.
+      # Security audit - scans all installed frontend packages for known CVEs.
+      # Frontend dependencies are a common attack vector (supply chain attacks,
+      # XSS via malicious packages, etc.) so auditing both sides is important.
+      # Same --audit-level=high policy as the backend audit above.
       - run:
           name: Security audit (frontend)
-          command: |
-            cd frontend
-            npm audit --audit-level=high || true
+          command: cd frontend && npm audit --audit-level=high || true
 
-      # Production build — compiles the React app with Webpack.
-      # Catches JSX syntax errors, missing imports, broken components,
-      # and any other compile-time issues before they reach main.
-      # CI=false prevents warnings from being treated as errors.
+      # Production build - compiles the entire React application using
+      # Create React App's Webpack configuration into static files.
+      # This step catches:
+      #   - JSX syntax errors
+      #   - Missing or broken imports
+      #   - Broken components that fail at compile time
+      #   - Any TypeScript/prop-type errors (if applicable)
+      # CI=false prevents ESLint warnings from being treated as build errors,
+      # which would cause false positives on a student project with warnings
+      # that don't affect functionality.
       - run:
           name: Build React app
-          command: |
-            cd frontend
-            CI=false npm run build
+          command: cd frontend && CI=false npm run build
 
-      # Confirm the build output was generated
+      # Build verification - confirms the Webpack output was actually generated
+      # by checking for the existence of the main index.html entry point.
+      # If the build step above silently failed, this step will catch it.
       - run:
           name: Verify build output exists
           command: |
@@ -107,7 +146,13 @@ jobs:
 
 # =============================================================================
 # WORKFLOWS
-# Both jobs running in parallel to keep the pipeline fast.
+# Workflows define when jobs run and in what order.
+#
+# dev-pipeline:
+#   - Runs ONLY on the dev branch (enforced by the branch filter below)
+#   - Both jobs run IN PARALLEL to minimise total pipeline duration
+#   - Any push to dev (including empty commits) triggers this workflow
+#   - Pushes to main, feature branches, or other branches are ignored
 # =============================================================================
 workflows:
   dev-pipeline:
@@ -115,9 +160,9 @@ workflows:
       - backend-checks:
           filters:
             branches:
-              only: dev    # Only runs on the dev branch
+              only: dev    # Only triggers on pushes to the dev branch
 
       - frontend-checks:
           filters:
             branches:
-              only: dev    # Only runs on the dev branch
+              only: dev    # Only triggers on pushes to the dev branch
