@@ -12,16 +12,16 @@ const rateLimit = require("express-rate-limit");
 const { authRoutes } = require("./routes/authRoutes");
 const { receiptRoutes } = require('./routes/receiptRoutes');
 const { adminRoutes } = require("./routes/adminRoutes");
+const { premiumRoutes } = require("./routes/premiumRoutes");
 const { errorMiddleware } = require("./middleware/errorMiddleware");
 
 /**
- * Creating and configuring the Express app.
+ * Creates and configures the Express app.
+ * Premium routes are registered under /premium and require PREMIUM role.
  */
 function createApp() {
   const app = express();
 
-  // Trust the first proxy hop - required for express-rate-limit to work correctly
-  // without this, rate limiting throws a ValidationError on startup
   app.set('trust proxy', 1);
 
   app.use(helmet());
@@ -42,6 +42,7 @@ function createApp() {
   app.use("/auth", authRoutes);
   app.use('/receipts', receiptRoutes);
   app.use("/admin", adminRoutes);
+  app.use("/premium", premiumRoutes);
 
   app.use(errorMiddleware);
 
