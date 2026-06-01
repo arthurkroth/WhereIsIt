@@ -2,6 +2,12 @@
  * Receipt Controller with OCR Integration, Multi-Item Support, Notes, and Tags.
  * Author: Arthur Kroth - x22166971
  * WhereIsIt Project
+ *
+ * KEY CHANGES:
+ * - uploadReceipt passes req.user.role to ocrService so Premium → OpenAI, Free → Tesseract
+ * - uploadReceipt returns aiProviderError and aiProviderMessage when OpenAI falls back to Tesseract
+ * - Storage limit only enforced for FREE role (Premium = unlimited)
+ * - listReceipts returns fileType ('pdf'|'image'|null) for advanced frontend filters
  */
 
 const { OcrService } = require('../services/ocrService');
@@ -13,19 +19,12 @@ const fs = require('fs').promises;
 const ocrService = new OcrService();
 const encryption = new EncryptionService();
 
-// Maximum number of receipts allowed for FREE tier users
 const FREE_TIER_LIMIT = 10;
 
 // ============================================================================
-// HELPER FUNCTIONS
+// HELPERS
 // ============================================================================
 
-/**
- * Calculates the warranty expiry date from a purchase date and duration.
- * @param {string} purchaseDate - YYYY-MM-DD
- * @param {number} warrantyMonths
- * @returns {string} Expiry date in YYYY-MM-DD
- */
 function calculateWarrantyExpiry(purchaseDate, warrantyMonths) {
   const purchase = new Date(purchaseDate);
   const expiry = new Date(purchase);
@@ -33,31 +32,28 @@ function calculateWarrantyExpiry(purchaseDate, warrantyMonths) {
   return expiry.toISOString().split('T')[0];
 }
 
-/**
- * Determines warranty status.
- * @param {string} purchaseDate
- * @param {number} warrantyMonths
- * @returns {string} 'active', 'expiring_soon', or 'expired'
- */
 function getWarrantyStatus(purchaseDate, warrantyMonths) {
   const now = new Date();
   const expiry = new Date(purchaseDate);
   expiry.setMonth(expiry.getMonth() + warrantyMonths);
-
   if (now > expiry) return 'expired';
-
   const daysLeft = (expiry - now) / (1000 * 60 * 60 * 24);
   if (daysLeft <= 30) return 'expiring_soon';
-
   return 'active';
 }
 
 /**
- * Inserts an array of items into the receipt_items table.
- * Each product description is encrypted before storage.
- * @param {number} receiptId
- * @param {Array} items - [{productDescription, price, warrantyMonths}]
+ * Derives the file type from a stored filename.
+ * Returns 'pdf', 'image', or null (for manual entries with no file).
  */
+function getFileType(filePath) {
+  if (!filePath) return null;
+  const ext = path.extname(filePath).toLowerCase();
+  if (ext === '.pdf') return 'pdf';
+  if (['.jpg', '.jpeg', '.png'].includes(ext)) return 'image';
+  return null;
+}
+
 async function insertReceiptItems(receiptId, items) {
   for (const item of items) {
     const encryptedProduct = encryption.encrypt(item.productDescription);
@@ -69,18 +65,12 @@ async function insertReceiptItems(receiptId, items) {
   }
 }
 
-/**
- * Fetches and decrypts all items for a given receipt ID.
- * @param {number} receiptId
- * @returns {Promise<Array>}
- */
 async function getReceiptItems(receiptId) {
   const [rows] = await db.execute(
     `SELECT id, product_desc_enc, price, warranty_months, created_at
      FROM receipt_items WHERE receipt_id = ? ORDER BY id ASC`,
     [receiptId]
   );
-
   return rows.map(item => {
     try {
       return {
@@ -90,58 +80,49 @@ async function getReceiptItems(receiptId) {
         warrantyMonths: item.warranty_months,
         createdAt: item.created_at
       };
-    } catch (err) {
-      console.error('Decryption error for item', item.id, ':', err);
-      return null;
-    }
-  }).filter(item => item !== null);
+    } catch { return null; }
+  }).filter(Boolean);
 }
 
 /**
- * Checks whether the user has reached their storage limit.
- * Only enforced for FREE tier users (limit: FREE_TIER_LIMIT receipts).
- * @param {number} userId
- * @param {string} role - User's role from JWT
- * @returns {Promise<{limitReached: boolean, count: number}>}
+ * Checks storage limit — only enforced for FREE tier.
+ * Premium users always pass this check.
  */
 async function checkStorageLimit(userId, role) {
   if (role !== 'FREE') return { limitReached: false, count: 0 };
-
   const [countResult] = await db.execute(
-    'SELECT COUNT(*) as count FROM receipts WHERE user_id = ?',
-    [userId]
+    'SELECT COUNT(*) as count FROM receipts WHERE user_id = ?', [userId]
   );
   const count = countResult[0].count;
   return { limitReached: count >= FREE_TIER_LIMIT, count };
 }
 
 // ============================================================================
-// ENDPOINT HANDLERS
+// UPLOAD RECEIPT
 // ============================================================================
 
 /**
  * POST /receipts/upload
- * Handles receipt file upload and OCR processing.
- * Enforces storage limits for FREE tier users before processing.
+ * Handles file upload and OCR processing.
+ * Routes to OpenAI (Premium) or Tesseract (Free) based on user role.
+ * If OpenAI fails, ocrService automatically falls back to Tesseract and
+ * sets aiProviderError = true on the result — this is surfaced to the frontend
+ * so the user is notified that AI OCR was unavailable.
  */
 async function uploadReceipt(req, res) {
   try {
-    if (!req.file) {
-      return res.status(400).json({ error: 'No file uploaded' });
-    }
+    if (!req.file) return res.status(400).json({ error: 'No file uploaded' });
 
     const userId = req.user.userId;
     const userRole = req.user.role;
     const file = req.file;
 
-    // Check storage limit before processing — saves time and disk space
     const { limitReached, count } = await checkStorageLimit(userId, userRole);
     if (limitReached) {
       await fs.unlink(file.path).catch(() => {});
       return res.status(403).json({
         error: `Free tier limit reached. You have ${count}/${FREE_TIER_LIMIT} receipts. Upgrade to Premium for unlimited storage.`,
-        limitReached: true,
-        upgradeRequired: true
+        limitReached: true, upgradeRequired: true
       });
     }
 
@@ -156,12 +137,9 @@ async function uploadReceipt(req, res) {
       return res.status(400).json({ error: 'File too large. Maximum size is 10MB.' });
     }
 
-    const ocrResult = await ocrService.processReceipt(file.path, file.mimetype);
-
-    if (!ocrResult.success) {
-      console.error('OCR processing failed:', ocrResult.error);
-    }
-
+    // Pass userRole so the service routes to OpenAI or Tesseract accordingly.
+    // If OpenAI fails, the service falls back to Tesseract and sets aiProviderError.
+    const ocrResult = await ocrService.processReceipt(file.path, file.mimetype, userRole);
     const extractedData = ocrService.validateExtractedData(ocrResult.extractedData);
     const encryptedStoreName = encryption.encrypt(extractedData.storeName);
 
@@ -176,19 +154,21 @@ async function uploadReceipt(req, res) {
     const receiptId = result.insertId;
     await insertReceiptItems(receiptId, extractedData.items);
 
+    // Determine which OCR method was actually used
+    const usedOpenAI = userRole === 'PREMIUM' && !ocrResult.aiProviderError;
+
     try {
       await db.execute(
         "INSERT INTO audit_logs (user_id, action, details) VALUES (?, ?, ?)",
-        [userId, "RECEIPT_UPLOADED", `Receipt ${receiptId} uploaded. OCR confidence: ${extractedData.confidence}`]
+        [userId, 'RECEIPT_UPLOADED',
+         `Receipt ${receiptId} uploaded via ${usedOpenAI ? 'OpenAI' : 'Tesseract'} OCR. Confidence: ${extractedData.confidence}`]
       );
-    } catch (err) {
-      console.log('Audit log skipped:', err.message);
-    }
+    } catch (err) { console.log('Audit log skipped:', err.message); }
 
     return res.json({
       success: true,
       receiptId,
-      message: 'Receipt uploaded and processed successfully',
+      message: `Receipt uploaded and processed successfully${usedOpenAI ? ' (AI-enhanced)' : ''}`,
       extractedData: {
         storeName: extractedData.storeName,
         purchaseDate: extractedData.purchaseDate,
@@ -200,23 +180,27 @@ async function uploadReceipt(req, res) {
         tags: []
       },
       ocrSuccess: ocrResult.success,
+      ocrMethod: usedOpenAI ? 'openai' : 'tesseract',
+      // These two fields notify the frontend when OpenAI fell back to Tesseract
+      aiProviderError: ocrResult.aiProviderError || false,
+      aiProviderMessage: ocrResult.aiProviderMessage || null,
       canEdit: true
     });
 
   } catch (error) {
-    console.error('Receipt upload error:', error);
-    if (req.file && req.file.path) {
-      await fs.unlink(req.file.path).catch(() => {});
-    }
+    if (req.file?.path) await fs.unlink(req.file.path).catch(() => {});
     return res.status(500).json({ error: 'Failed to process receipt', details: error.message });
   }
 }
 
+// ============================================================================
+// MANUAL RECEIPT
+// ============================================================================
+
 /**
  * POST /receipts/manual
  * Creates a receipt from manually entered data.
- * Enforces storage limits for FREE tier users.
- * Accepts notes (free text, encrypted) and tags (JSON array, plain).
+ * Storage limit only applies to FREE tier.
  */
 async function createManualReceipt(req, res) {
   try {
@@ -224,38 +208,26 @@ async function createManualReceipt(req, res) {
     const userRole = req.user.role;
     const { storeName, purchaseDate, totalPrice, warrantyMonths, items, notes, tags } = req.body;
 
-    // Check storage limit
     const { limitReached, count } = await checkStorageLimit(userId, userRole);
     if (limitReached) {
       return res.status(403).json({
-        error: `Free tier limit reached. You have ${count}/${FREE_TIER_LIMIT} receipts. Upgrade to Premium for unlimited storage.`,
-        limitReached: true,
-        upgradeRequired: true
+        error: `Free tier limit reached. You have ${count}/${FREE_TIER_LIMIT} receipts.`,
+        limitReached: true, upgradeRequired: true
       });
     }
 
-    if (!storeName || !purchaseDate) {
-      return res.status(400).json({ error: 'Missing required fields: storeName and purchaseDate' });
-    }
-
+    if (!storeName || !purchaseDate) return res.status(400).json({ error: 'Missing required fields' });
     if (!items || !Array.isArray(items) || items.length === 0) {
       return res.status(400).json({ error: 'At least one item is required' });
     }
 
     const encryptedStoreName = encryption.encrypt(storeName);
-
-    // Encrypt notes if provided (they may contain sensitive purchase details)
-    const encryptedNotes = notes && notes.trim()
-      ? encryption.encrypt(notes.trim().substring(0, 1000))
-      : null;
-
-    // Tags are stored as a JSON array string — not sensitive so not encrypted
+    const encryptedNotes = notes?.trim() ? encryption.encrypt(notes.trim().substring(0, 1000)) : null;
     const tagsJson = Array.isArray(tags) ? JSON.stringify(tags) : '[]';
 
     const [result] = await db.execute(
-      `INSERT INTO receipts
-       (user_id, file_path, store_name_enc, purchase_date, total_price, warranty_months,
-        ocr_confidence, notes_enc, tags, created_at)
+      `INSERT INTO receipts (user_id, file_path, store_name_enc, purchase_date, total_price,
+       warranty_months, ocr_confidence, notes_enc, tags, created_at)
        VALUES (?, NULL, ?, ?, ?, ?, 'manual', ?, ?, NOW())`,
       [userId, encryptedStoreName, purchaseDate, parseFloat(totalPrice) || 0,
        parseInt(warrantyMonths) || 12, encryptedNotes, tagsJson]
@@ -267,25 +239,25 @@ async function createManualReceipt(req, res) {
     try {
       await db.execute(
         "INSERT INTO audit_logs (user_id, action, details) VALUES (?, ?, ?)",
-        [userId, "RECEIPT_MANUAL_ENTRY", `Manual receipt ${receiptId} created with ${items.length} item(s)`]
+        [userId, 'RECEIPT_MANUAL_ENTRY', `Manual receipt ${receiptId} created with ${items.length} item(s)`]
       );
-    } catch (err) {
-      console.log('Audit log skipped:', err.message);
-    }
+    } catch (err) { console.log('Audit log skipped:', err.message); }
 
     return res.json({ success: true, receiptId, message: 'Receipt created successfully' });
-
   } catch (error) {
-    console.error('Manual receipt creation error:', error);
     return res.status(500).json({ error: 'Failed to create receipt' });
   }
 }
 
+// ============================================================================
+// LIST RECEIPTS
+// ============================================================================
+
 /**
  * GET /receipts
- * Retrieves all receipts for the authenticated user.
- * Decrypts sensitive fields and parses tags for display.
- * Also returns storage usage info for FREE tier users.
+ * Returns all receipts for the authenticated user.
+ * Includes fileType ('pdf'|'image'|null) for advanced frontend filtering.
+ * For Premium users, storageInfo shows unlimited status.
  */
 async function listReceipts(req, res) {
   try {
@@ -299,271 +271,170 @@ async function listReceipts(req, res) {
       [userId]
     );
 
-    const receipts = await Promise.all(
-      rows.map(async (receipt) => {
-        try {
-          const items = await getReceiptItems(receipt.id);
+    const receipts = await Promise.all(rows.map(async (receipt) => {
+      try {
+        const items = await getReceiptItems(receipt.id);
+        let notes = null;
+        if (receipt.notes_enc) { try { notes = encryption.decrypt(receipt.notes_enc); } catch {} }
+        let tags = [];
+        try { tags = JSON.parse(receipt.tags || '[]'); } catch {}
 
-          // Safely decrypt notes — returns null if no notes stored
-          let notes = null;
-          if (receipt.notes_enc) {
-            try { notes = encryption.decrypt(receipt.notes_enc); } catch { notes = null; }
-          }
+        return {
+          id: receipt.id,
+          storeName: encryption.decrypt(receipt.store_name_enc),
+          purchaseDate: receipt.purchase_date,
+          totalPrice: receipt.total_price,
+          warrantyMonths: receipt.warranty_months,
+          warrantyExpiry: calculateWarrantyExpiry(receipt.purchase_date, receipt.warranty_months),
+          warrantyStatus: getWarrantyStatus(receipt.purchase_date, receipt.warranty_months),
+          ocrConfidence: receipt.ocr_confidence,
+          hasFile: receipt.file_path !== null,
+          fileType: getFileType(receipt.file_path),
+          itemCount: items.length,
+          firstItemDescription: items.length > 0 ? items[0].productDescription : 'No items',
+          items, notes, tags,
+          createdAt: receipt.created_at
+        };
+      } catch { return null; }
+    }));
 
-          // Safely parse tags JSON array
-          let tags = [];
-          try { tags = JSON.parse(receipt.tags || '[]'); } catch { tags = []; }
+    const validReceipts = receipts.filter(Boolean);
 
-          return {
-            id: receipt.id,
-            storeName: encryption.decrypt(receipt.store_name_enc),
-            purchaseDate: receipt.purchase_date,
-            totalPrice: receipt.total_price,
-            warrantyMonths: receipt.warranty_months,
-            warrantyExpiry: calculateWarrantyExpiry(receipt.purchase_date, receipt.warranty_months),
-            warrantyStatus: getWarrantyStatus(receipt.purchase_date, receipt.warranty_months),
-            ocrConfidence: receipt.ocr_confidence,
-            hasFile: receipt.file_path !== null,
-            itemCount: items.length,
-            firstItemDescription: items.length > 0 ? items[0].productDescription : 'No items',
-            items,
-            notes,
-            tags,
-            createdAt: receipt.created_at
-          };
-        } catch (err) {
-          console.error('Error processing receipt', receipt.id, ':', err);
-          return null;
-        }
-      })
-    );
-
-    const validReceipts = receipts.filter(r => r !== null);
-
-    // Build storage info for FREE tier users
     const storageInfo = userRole === 'FREE'
       ? { used: validReceipts.length, limit: FREE_TIER_LIMIT, isLimited: true }
-      : { used: validReceipts.length, limit: null, isLimited: false };
+      : { used: validReceipts.length, limit: null, isLimited: false, unlimited: true };
 
-    return res.json({
-      success: true,
-      receipts: validReceipts,
-      totalCount: validReceipts.length,
-      storageInfo
-    });
-
+    return res.json({ success: true, receipts: validReceipts, totalCount: validReceipts.length, storageInfo });
   } catch (error) {
-    console.error('List receipts error:', error);
     return res.status(500).json({ error: 'Failed to retrieve receipts' });
   }
 }
 
-/**
- * GET /receipts/:id
- * Returns a single receipt with all its items, notes, and tags.
- */
+// ============================================================================
+// GET / UPDATE / DELETE SINGLE RECEIPT
+// ============================================================================
+
 async function getReceiptById(req, res) {
   try {
     const userId = req.user.userId;
-    const receiptId = req.params.id;
-
     const [rows] = await db.execute(
       `SELECT id, file_path, store_name_enc, purchase_date, total_price,
               warranty_months, ocr_confidence, notes_enc, tags, created_at
        FROM receipts WHERE id = ? AND user_id = ?`,
-      [receiptId, userId]
+      [req.params.id, userId]
     );
-
-    if (rows.length === 0) {
-      return res.status(404).json({ error: 'Receipt not found' });
-    }
+    if (rows.length === 0) return res.status(404).json({ error: 'Receipt not found' });
 
     const receipt = rows[0];
     const items = await getReceiptItems(receipt.id);
-
     let notes = null;
-    if (receipt.notes_enc) {
-      try { notes = encryption.decrypt(receipt.notes_enc); } catch { notes = null; }
-    }
-
+    if (receipt.notes_enc) { try { notes = encryption.decrypt(receipt.notes_enc); } catch {} }
     let tags = [];
-    try { tags = JSON.parse(receipt.tags || '[]'); } catch { tags = []; }
+    try { tags = JSON.parse(receipt.tags || '[]'); } catch {}
 
-    const decrypted = {
-      id: receipt.id,
-      storeName: encryption.decrypt(receipt.store_name_enc),
-      purchaseDate: receipt.purchase_date,
-      totalPrice: receipt.total_price,
-      warrantyMonths: receipt.warranty_months,
-      warrantyExpiry: calculateWarrantyExpiry(receipt.purchase_date, receipt.warranty_months),
-      warrantyStatus: getWarrantyStatus(receipt.purchase_date, receipt.warranty_months),
-      ocrConfidence: receipt.ocr_confidence,
-      hasFile: receipt.file_path !== null,
-      fileName: receipt.file_path,
-      items,
-      itemCount: items.length,
-      notes,
-      tags,
-      createdAt: receipt.created_at
-    };
-
-    return res.json({ success: true, receipt: decrypted });
-
+    return res.json({
+      success: true,
+      receipt: {
+        id: receipt.id,
+        storeName: encryption.decrypt(receipt.store_name_enc),
+        purchaseDate: receipt.purchase_date,
+        totalPrice: receipt.total_price,
+        warrantyMonths: receipt.warranty_months,
+        warrantyExpiry: calculateWarrantyExpiry(receipt.purchase_date, receipt.warranty_months),
+        warrantyStatus: getWarrantyStatus(receipt.purchase_date, receipt.warranty_months),
+        ocrConfidence: receipt.ocr_confidence,
+        hasFile: receipt.file_path !== null,
+        fileType: getFileType(receipt.file_path),
+        fileName: receipt.file_path,
+        items, itemCount: items.length, notes, tags,
+        createdAt: receipt.created_at
+      }
+    });
   } catch (error) {
-    console.error('Get receipt error:', error);
     return res.status(500).json({ error: 'Failed to retrieve receipt' });
   }
 }
 
-/**
- * PUT /receipts/:id
- * Updates a receipt header, items, notes, and tags.
- * Deletes and re-inserts items for simplicity.
- */
 async function updateReceipt(req, res) {
   try {
     const userId = req.user.userId;
-    const receiptId = req.params.id;
     const { storeName, purchaseDate, totalPrice, warrantyMonths, items, notes, tags } = req.body;
 
     const [existing] = await db.execute(
-      'SELECT id FROM receipts WHERE id = ? AND user_id = ?',
-      [receiptId, userId]
+      'SELECT id FROM receipts WHERE id = ? AND user_id = ?', [req.params.id, userId]
     );
+    if (existing.length === 0) return res.status(404).json({ error: 'Receipt not found' });
 
-    if (existing.length === 0) {
-      return res.status(404).json({ error: 'Receipt not found' });
-    }
-
-    const encryptedStoreName = encryption.encrypt(storeName);
-
-    const encryptedNotes = notes && notes.trim()
-      ? encryption.encrypt(notes.trim().substring(0, 1000))
-      : null;
-
+    const encryptedNotes = notes?.trim() ? encryption.encrypt(notes.trim().substring(0, 1000)) : null;
     const tagsJson = Array.isArray(tags) ? JSON.stringify(tags) : '[]';
 
     await db.execute(
       `UPDATE receipts SET store_name_enc = ?, purchase_date = ?, total_price = ?,
        warranty_months = ?, notes_enc = ?, tags = ? WHERE id = ? AND user_id = ?`,
-      [encryptedStoreName, purchaseDate, parseFloat(totalPrice) || 0,
-       parseInt(warrantyMonths) || 12, encryptedNotes, tagsJson, receiptId, userId]
+      [encryption.encrypt(storeName), purchaseDate, parseFloat(totalPrice) || 0,
+       parseInt(warrantyMonths) || 12, encryptedNotes, tagsJson, req.params.id, userId]
     );
 
-    if (items && Array.isArray(items) && items.length > 0) {
-      await db.execute('DELETE FROM receipt_items WHERE receipt_id = ?', [receiptId]);
-      await insertReceiptItems(receiptId, items);
+    if (items?.length > 0) {
+      await db.execute('DELETE FROM receipt_items WHERE receipt_id = ?', [req.params.id]);
+      await insertReceiptItems(req.params.id, items);
     }
 
     try {
-      await db.execute(
-        "INSERT INTO audit_logs (user_id, action, details) VALUES (?, ?, ?)",
-        [userId, "RECEIPT_UPDATED", `Receipt ${receiptId} updated`]
-      );
-    } catch (err) {
-      console.log('Audit log skipped:', err.message);
-    }
+      await db.execute("INSERT INTO audit_logs (user_id, action, details) VALUES (?, ?, ?)",
+        [userId, 'RECEIPT_UPDATED', `Receipt ${req.params.id} updated`]);
+    } catch {}
 
     return res.json({ success: true, message: 'Receipt updated successfully' });
-
   } catch (error) {
-    console.error('Update receipt error:', error);
     return res.status(500).json({ error: 'Failed to update receipt' });
   }
 }
 
-/**
- * DELETE /receipts/:id
- * Deletes a receipt, all its items (via CASCADE), and its uploaded file.
- */
 async function deleteReceipt(req, res) {
   try {
     const userId = req.user.userId;
-    const receiptId = req.params.id;
-
     const [rows] = await db.execute(
-      'SELECT file_path FROM receipts WHERE id = ? AND user_id = ?',
-      [receiptId, userId]
+      'SELECT file_path FROM receipts WHERE id = ? AND user_id = ?', [req.params.id, userId]
     );
+    if (rows.length === 0) return res.status(404).json({ error: 'Receipt not found' });
 
-    if (rows.length === 0) {
-      return res.status(404).json({ error: 'Receipt not found' });
-    }
+    await db.execute('DELETE FROM receipts WHERE id = ? AND user_id = ?', [req.params.id, userId]);
 
-    const filePath = rows[0].file_path;
-
-    await db.execute('DELETE FROM receipts WHERE id = ? AND user_id = ?', [receiptId, userId]);
-
-    if (filePath) {
-      const fullPath = path.join(__dirname, '../../uploads', filePath);
-      await fs.unlink(fullPath).catch(() => {
-        console.log('File not found or already deleted:', filePath);
-      });
+    if (rows[0].file_path) {
+      await fs.unlink(path.join(__dirname, '../../uploads', rows[0].file_path)).catch(() => {});
     }
 
     try {
-      await db.execute(
-        "INSERT INTO audit_logs (user_id, action, details) VALUES (?, ?, ?)",
-        [userId, "RECEIPT_DELETED", `Receipt ${receiptId} deleted`]
-      );
-    } catch (err) {
-      console.log('Audit log skipped:', err.message);
-    }
+      await db.execute("INSERT INTO audit_logs (user_id, action, details) VALUES (?, ?, ?)",
+        [userId, 'RECEIPT_DELETED', `Receipt ${req.params.id} deleted`]);
+    } catch {}
 
     return res.json({ success: true, message: 'Receipt deleted successfully' });
-
   } catch (error) {
-    console.error('Delete receipt error:', error);
     return res.status(500).json({ error: 'Failed to delete receipt' });
   }
 }
 
-/**
- * GET /receipts/:id/file
- * Serves the uploaded receipt file securely.
- */
 async function getReceiptFile(req, res) {
   try {
     const userId = req.user.userId;
-    const receiptId = req.params.id;
-
     const [rows] = await db.execute(
-      'SELECT file_path FROM receipts WHERE id = ? AND user_id = ?',
-      [receiptId, userId]
+      'SELECT file_path FROM receipts WHERE id = ? AND user_id = ?', [req.params.id, userId]
     );
+    if (rows.length === 0) return res.status(404).json({ error: 'Receipt not found' });
+    if (!rows[0].file_path) return res.status(404).json({ error: 'No file attached' });
 
-    if (rows.length === 0) {
-      return res.status(404).json({ error: 'Receipt not found' });
-    }
-
-    const fileName = rows[0].file_path;
-
-    if (!fileName) {
-      return res.status(404).json({ error: 'No file attached to this receipt' });
-    }
-
-    const fullPath = path.join(__dirname, '../../uploads', fileName);
-
-    try {
-      await fs.access(fullPath);
-    } catch {
-      return res.status(404).json({ error: 'File not found on server' });
-    }
+    const fullPath = path.join(__dirname, '../../uploads', rows[0].file_path);
+    try { await fs.access(fullPath); } catch { return res.status(404).json({ error: 'File not found' }); }
 
     return res.sendFile(fullPath);
-
   } catch (error) {
-    console.error('Get receipt file error:', error);
     return res.status(500).json({ error: 'Failed to retrieve file' });
   }
 }
 
 module.exports = {
-  uploadReceipt,
-  createManualReceipt,
-  listReceipts,
-  getReceiptById,
-  getReceiptFile,
-  updateReceipt,
-  deleteReceipt
+  uploadReceipt, createManualReceipt, listReceipts,
+  getReceiptById, getReceiptFile, updateReceipt, deleteReceipt
 };

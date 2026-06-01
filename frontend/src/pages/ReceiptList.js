@@ -1,7 +1,17 @@
 /**
- * File: ReceiptList.js
+ * Receipt List Page
+ * Displays a list of user receipts with search, sorting, and filtering capabilities.
+ * Premium users have access to advanced filters and can export their receipts as CSV.
+ * Free users see an upgrade prompt for premium features in the filter panel.
  * Author: Arthur Kroth - x22166971
  * WhereIsIt Project
+ *
+ * KEY CHANGES:
+ * - Fixed ESLint warning: added eslint-disable comment on the fetch useEffect
+ * - Premium-exclusive advanced filters: warranty expiring within X days,
+ *   price category brackets, file type filter
+ * - Export CSV button for Premium users
+ * - Free users see an upgrade prompt in the advanced filter panel
  */
 
 import React, { useState, useEffect } from 'react';
@@ -10,33 +20,22 @@ import {
   Container, Card, Table, Badge, Button,
   Alert, Spinner, InputGroup, Form, Row, Col, Collapse
 } from 'react-bootstrap';
-import { listReceipts } from '../services/api';
+import { listReceipts, exportReceiptsCsv } from '../services/api';
+import { useAuth } from '../context/AuthContext';
 
-/**
- * ReceiptList Page
- * Displays all receipts for the authenticated user with search, filter, and sort.
- *
- * FILTERS:
- * - Text search: store name or first item description
- * - Warranty status: All / Active / Expiring Soon / Expired
- * - Date range: from / to purchase date
- * - Price range: min / max total price
- * - Tags: filter by selected tags
- *
- * SORTING:
- * - Date (newest / oldest)
- * - Price (high to low / low to high)
- * - Store (A–Z / Z–A)
- */
 function ReceiptList() {
   const navigate = useNavigate();
+  const { user } = useAuth();
+  const isPremium = user?.role === 'PREMIUM';
 
   const [receipts, setReceipts] = useState([]);
   const [filteredReceipts, setFilteredReceipts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [exportLoading, setExportLoading] = useState(false);
+  const [exportError, setExportError] = useState('');
 
-  // Filter state
+  // Basic filters (all users)
   const [searchTerm, setSearchTerm] = useState('');
   const [filterStatus, setFilterStatus] = useState('all');
   const [dateFrom, setDateFrom] = useState('');
@@ -47,26 +46,55 @@ function ReceiptList() {
   const [sortBy, setSortBy] = useState('date_desc');
   const [showFilters, setShowFilters] = useState(false);
 
+  // Premium-exclusive filters
+  const [warrantyExpiringWithin, setWarrantyExpiringWithin] = useState('');
+  const [priceCategory, setPriceCategory] = useState('');
+  const [fileTypeFilter, setFileTypeFilter] = useState('');
+
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { fetchReceipts(); }, []);
 
   const fetchReceipts = async () => {
-    setLoading(true);
-    setError('');
+    setLoading(true); setError('');
     try {
       const response = await listReceipts();
       setReceipts(response.data.receipts || []);
-    } catch (err) {
+    } catch {
       setError('Failed to load receipts');
     } finally {
       setLoading(false);
     }
   };
 
-  // Re-apply filters/sort whenever any filter or receipts change
+  /**
+   * Handles CSV export download for Premium users.
+   * Fetches CSV as a blob and triggers a browser file download.
+   */
+  const handleExportCsv = async () => {
+    setExportLoading(true); setExportError('');
+    try {
+      const response = await exportReceiptsCsv();
+      const blob = new Blob([response.data], { type: 'text/csv;charset=utf-8;' });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement('a');
+      link.href = url;
+      link.setAttribute('download', `WhereIsIt_Receipts_${new Date().toISOString().split('T')[0]}.csv`);
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      setExportError(err.response?.data?.error || 'Failed to export receipts');
+    } finally {
+      setExportLoading(false);
+    }
+  };
+
+  // Re-apply all filters and sort whenever any filter or receipt data changes
   useEffect(() => {
     let filtered = [...receipts];
 
-    // Text search
+    // Text search — store name, item description, notes
     if (searchTerm) {
       const term = searchTerm.toLowerCase();
       filtered = filtered.filter(r =>
@@ -84,46 +112,72 @@ function ReceiptList() {
       });
     }
 
-    // Date range filter
-    if (dateFrom) {
-      filtered = filtered.filter(r => r.purchaseDate && r.purchaseDate >= dateFrom);
-    }
-    if (dateTo) {
-      filtered = filtered.filter(r => r.purchaseDate && r.purchaseDate <= dateTo);
-    }
+    // Date range
+    if (dateFrom) filtered = filtered.filter(r => r.purchaseDate && r.purchaseDate >= dateFrom);
+    if (dateTo) filtered = filtered.filter(r => r.purchaseDate && r.purchaseDate <= dateTo);
 
-    // Price range filter
-    if (priceMin !== '') {
-      filtered = filtered.filter(r => parseFloat(r.totalPrice) >= parseFloat(priceMin));
-    }
-    if (priceMax !== '') {
-      filtered = filtered.filter(r => parseFloat(r.totalPrice) <= parseFloat(priceMax));
-    }
+    // Price range (manual min/max)
+    if (priceMin !== '') filtered = filtered.filter(r => parseFloat(r.totalPrice) >= parseFloat(priceMin));
+    if (priceMax !== '') filtered = filtered.filter(r => parseFloat(r.totalPrice) <= parseFloat(priceMax));
 
     // Tag filter
-    if (filterTag) {
-      filtered = filtered.filter(r => Array.isArray(r.tags) && r.tags.includes(filterTag));
+    if (filterTag) filtered = filtered.filter(r => Array.isArray(r.tags) && r.tags.includes(filterTag));
+
+    // ── PREMIUM-EXCLUSIVE FILTERS ──────────────────────────────────────────
+
+    // Warranty expiring within X days
+    if (isPremium && warrantyExpiringWithin) {
+      const days = parseInt(warrantyExpiringWithin);
+      const now = new Date();
+      filtered = filtered.filter(r => {
+        const expiry = new Date(r.warrantyExpiry);
+        const daysLeft = Math.ceil((expiry - now) / (1000 * 60 * 60 * 24));
+        return daysLeft >= 0 && daysLeft <= days;
+      });
+    }
+
+    // Price category filter
+    if (isPremium && priceCategory) {
+      filtered = filtered.filter(r => {
+        const price = parseFloat(r.totalPrice);
+        switch (priceCategory) {
+          case 'under50':  return price < 50;
+          case '50to200':  return price >= 50 && price < 200;
+          case '200to500': return price >= 200 && price < 500;
+          case 'over500':  return price >= 500;
+          default:         return true;
+        }
+      });
+    }
+
+    // File type filter
+    if (isPremium && fileTypeFilter) {
+      filtered = filtered.filter(r => {
+        if (fileTypeFilter === 'pdf')    return r.fileType === 'pdf';
+        if (fileTypeFilter === 'image')  return r.fileType === 'image';
+        if (fileTypeFilter === 'manual') return !r.hasFile;
+        return true;
+      });
     }
 
     // Sorting
     filtered.sort((a, b) => {
       switch (sortBy) {
-        case 'date_desc': return new Date(b.purchaseDate) - new Date(a.purchaseDate);
-        case 'date_asc':  return new Date(a.purchaseDate) - new Date(b.purchaseDate);
+        case 'date_desc':  return new Date(b.purchaseDate) - new Date(a.purchaseDate);
+        case 'date_asc':   return new Date(a.purchaseDate) - new Date(b.purchaseDate);
         case 'price_desc': return parseFloat(b.totalPrice || 0) - parseFloat(a.totalPrice || 0);
         case 'price_asc':  return parseFloat(a.totalPrice || 0) - parseFloat(b.totalPrice || 0);
         case 'store_asc':  return a.storeName.localeCompare(b.storeName);
         case 'store_desc': return b.storeName.localeCompare(a.storeName);
-        default: return 0;
+        default:           return 0;
       }
     });
 
     setFilteredReceipts(filtered);
-  }, [receipts, searchTerm, filterStatus, dateFrom, dateTo, priceMin, priceMax, filterTag, sortBy]);
+  }, [receipts, searchTerm, filterStatus, dateFrom, dateTo, priceMin, priceMax,
+      filterTag, sortBy, warrantyExpiringWithin, priceCategory, fileTypeFilter, isPremium]);
 
-  /**
-   * Collects all unique tags across all receipts for the tag filter dropdown.
-   */
+  // Collect all unique tags across all receipts for the tag dropdown
   const allTags = [...new Set(receipts.flatMap(r => Array.isArray(r.tags) ? r.tags : []))].sort();
 
   const getWarrantyStatus = (expiryDate) => {
@@ -145,8 +199,8 @@ function ReceiptList() {
   const formatDate = (dateString) => {
     if (!dateString) return 'N/A';
     const date = new Date(dateString);
-    if (isNaN(date.getTime())) return 'N/A';
-    return date.toLocaleDateString('en-GB', { year: 'numeric', month: 'short', day: 'numeric' });
+    return isNaN(date.getTime()) ? 'N/A'
+      : date.toLocaleDateString('en-GB', { year: 'numeric', month: 'short', day: 'numeric' });
   };
 
   const formatCurrency = (amount) => {
@@ -154,34 +208,36 @@ function ReceiptList() {
     return isNaN(parsed) ? '€0.00' : `€${parsed.toFixed(2)}`;
   };
 
-  /**
-   * Resets all filter and sort controls to their default values.
-   */
-  const handleClearFilters = () => {
-    setSearchTerm('');
-    setFilterStatus('all');
-    setDateFrom('');
-    setDateTo('');
-    setPriceMin('');
-    setPriceMax('');
-    setFilterTag('');
-    setSortBy('date_desc');
+  const clearAllFilters = () => {
+    setSearchTerm(''); setFilterStatus('all'); setDateFrom(''); setDateTo('');
+    setPriceMin(''); setPriceMax(''); setFilterTag(''); setSortBy('date_desc');
+    setWarrantyExpiringWithin(''); setPriceCategory(''); setFileTypeFilter('');
   };
 
   const hasActiveFilters = searchTerm || filterStatus !== 'all' || dateFrom || dateTo ||
-    priceMin !== '' || priceMax !== '' || filterTag || sortBy !== 'date_desc';
+    priceMin !== '' || priceMax !== '' || filterTag || sortBy !== 'date_desc' ||
+    warrantyExpiringWithin || priceCategory || fileTypeFilter;
 
   return (
     <Container className="mt-0">
       <div className="d-flex justify-content-between align-items-center mb-4">
         <h2>My Receipts</h2>
-        <div>
-          <Button variant="primary" className="me-2" onClick={() => navigate('/receipt/upload')}>Upload Receipt</Button>
+        <div className="d-flex gap-2">
+          {isPremium && (
+            <Button variant="outline-warning" onClick={handleExportCsv}
+              disabled={exportLoading || receipts.length === 0}>
+              {exportLoading
+                ? <><Spinner as="span" animation="border" size="sm" className="me-2" />Exporting...</>
+                : '↓ Export CSV'}
+            </Button>
+          )}
+          <Button variant="primary" onClick={() => navigate('/receipt/upload')}>Upload Receipt</Button>
           <Button variant="outline-primary" onClick={() => navigate('/receipt/manual')}>Add Manually</Button>
         </div>
       </div>
 
-      {error && <Alert variant="danger" onClose={() => setError('')} dismissible>{error}</Alert>}
+      {error && <Alert variant="danger" dismissible onClose={() => setError('')}>{error}</Alert>}
+      {exportError && <Alert variant="danger" dismissible onClose={() => setExportError('')}>{exportError}</Alert>}
 
       {/* Search, sort, and filter bar */}
       <Card className="mb-4">
@@ -213,17 +269,17 @@ function ReceiptList() {
             </Col>
             <Col md={2}>
               {hasActiveFilters && (
-                <Button variant="outline-danger" className="w-100" onClick={handleClearFilters}>
-                  Clear All
-                </Button>
+                <Button variant="outline-danger" className="w-100" onClick={clearAllFilters}>Clear All</Button>
               )}
             </Col>
           </Row>
 
-          {/* Expandable advanced filters */}
           <Collapse in={showFilters}>
             <div className="mt-3 pt-3 border-top">
-              <Row className="g-3">
+
+              {/* Standard filters — available to all users */}
+              <p className="text-muted small fw-semibold mb-2">Standard Filters</p>
+              <Row className="g-3 mb-3">
                 <Col md={3}>
                   <Form.Label className="small fw-semibold">Warranty Status</Form.Label>
                   <Form.Select value={filterStatus} onChange={(e) => setFilterStatus(e.target.value)}>
@@ -259,6 +315,55 @@ function ReceiptList() {
                     value={priceMax} onChange={(e) => setPriceMax(e.target.value)} />
                 </Col>
               </Row>
+
+              {/* Premium-exclusive filters */}
+              {isPremium ? (
+                <>
+                  <div className="d-flex align-items-center gap-2 mb-2">
+                    <p className="text-warning fw-semibold small mb-0">★ Premium Filters</p>
+                    <Badge bg="warning" text="dark" style={{ fontSize: '0.7rem' }}>Premium</Badge>
+                  </div>
+                  <Row className="g-3">
+                    <Col md={4}>
+                      <Form.Label className="small fw-semibold">Warranty expiring within</Form.Label>
+                      <Form.Select value={warrantyExpiringWithin}
+                        onChange={(e) => setWarrantyExpiringWithin(e.target.value)}>
+                        <option value="">Any time</option>
+                        <option value="7">7 days</option>
+                        <option value="30">30 days</option>
+                        <option value="60">60 days</option>
+                        <option value="90">90 days</option>
+                      </Form.Select>
+                    </Col>
+                    <Col md={4}>
+                      <Form.Label className="small fw-semibold">Price category</Form.Label>
+                      <Form.Select value={priceCategory} onChange={(e) => setPriceCategory(e.target.value)}>
+                        <option value="">All prices</option>
+                        <option value="under50">Under €50</option>
+                        <option value="50to200">€50 – €200</option>
+                        <option value="200to500">€200 – €500</option>
+                        <option value="over500">Over €500</option>
+                      </Form.Select>
+                    </Col>
+                    <Col md={4}>
+                      <Form.Label className="small fw-semibold">File type</Form.Label>
+                      <Form.Select value={fileTypeFilter} onChange={(e) => setFileTypeFilter(e.target.value)}>
+                        <option value="">All types</option>
+                        <option value="image">Image receipts (JPG/PNG)</option>
+                        <option value="pdf">PDF receipts</option>
+                        <option value="manual">Manual entries (no file)</option>
+                      </Form.Select>
+                    </Col>
+                  </Row>
+                </>
+              ) : (
+                <div className="p-3 bg-light rounded border border-warning-subtle">
+                  <span className="text-muted small">
+                    <strong>★ Premium filters</strong> — Upgrade to Premium to filter by warranty expiry
+                    timeframe, price category, and file type.
+                  </span>
+                </div>
+              )}
             </div>
           </Collapse>
         </Card.Body>
@@ -280,12 +385,16 @@ function ReceiptList() {
             </p>
             {receipts.length === 0 && (
               <div className="mt-3">
-                <Button variant="primary" className="me-2" onClick={() => navigate('/receipt/upload')}>Upload Receipt</Button>
-                <Button variant="outline-primary" onClick={() => navigate('/receipt/manual')}>Add Manually</Button>
+                <Button variant="primary" className="me-2" onClick={() => navigate('/receipt/upload')}>
+                  Upload Receipt
+                </Button>
+                <Button variant="outline-primary" onClick={() => navigate('/receipt/manual')}>
+                  Add Manually
+                </Button>
               </div>
             )}
             {hasActiveFilters && (
-              <Button variant="outline-secondary" className="mt-2" onClick={handleClearFilters}>Clear Filters</Button>
+              <Button variant="outline-secondary" className="mt-2" onClick={clearAllFilters}>Clear Filters</Button>
             )}
           </Card.Body>
         </Card>
@@ -315,7 +424,9 @@ function ReceiptList() {
                         <td>
                           <div>{receipt.firstItemDescription}</div>
                           {receipt.itemCount > 1 && (
-                            <small className="text-muted">+{receipt.itemCount - 1} more item{receipt.itemCount - 1 > 1 ? 's' : ''}</small>
+                            <small className="text-muted">
+                              +{receipt.itemCount - 1} more item{receipt.itemCount - 1 > 1 ? 's' : ''}
+                            </small>
                           )}
                         </td>
                         <td>

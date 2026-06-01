@@ -1,7 +1,12 @@
 /**
- * File: ReceiptUpload.js
+ * ReceiptUpload Page
  * Author: Arthur Kroth - x22166971
  * WhereIsIt Project
+ *
+ * KEY CHANGES:
+ * - Added aiProviderError state and notification banner
+ * - When OpenAI falls back to Tesseract, a warning alert is shown in the
+ *   review step telling the user that AI OCR was unavailable
  */
 
 import React, { useState, useRef, useEffect } from 'react';
@@ -21,6 +26,7 @@ import TagSelector from '../components/TagSelector';
  * STEP 1: File selection and upload
  * STEP 2: Split-screen review — edit form on left, receipt preview on right.
  *         Includes notes and tags fields for optional categorisation.
+ *         Shows an AI provider error banner if OpenAI fell back to Tesseract.
  * STEP 3: Save confirmed data and redirect.
  */
 function ReceiptUpload() {
@@ -36,6 +42,10 @@ function ReceiptUpload() {
 
   const [receiptId, setReceiptId] = useState(null);
   const [ocrSuccess, setOcrSuccess] = useState(false);
+  const [ocrMethod, setOcrMethod] = useState(null); // 'openai' | 'tesseract'
+  const [aiProviderError, setAiProviderError] = useState(false);
+  const [aiProviderMessage, setAiProviderMessage] = useState('');
+
   const [reviewHeader, setReviewHeader] = useState(null);
   const [reviewItems, setReviewItems] = useState([]);
   const [reviewNotes, setReviewNotes] = useState('');
@@ -54,6 +64,7 @@ function ReceiptUpload() {
   const MAX_ZOOM = 300;
   const ZOOM_STEP = 25;
 
+  // Load receipt file preview after OCR completes
   useEffect(() => {
     if (!receiptId) return;
     const fetchFile = async () => {
@@ -90,6 +101,8 @@ function ReceiptUpload() {
     setReviewTags([]);
     setReceiptId(null);
     setFileUrl(null);
+    setAiProviderError(false);
+    setAiProviderMessage('');
     setIsPdf(file.type === 'application/pdf');
     if (file.type.startsWith('image/')) {
       const reader = new FileReader();
@@ -120,6 +133,11 @@ function ReceiptUpload() {
     if (file) handleFileSelect(file);
   };
 
+  /**
+   * Uploads the selected file to the backend.
+   * The backend runs OCR (OpenAI or Tesseract depending on user role)
+   * and returns extracted data along with any AI provider error flags.
+   */
   const handleUploadSubmit = async (e) => {
     e.preventDefault();
     if (!selectedFile) { setError('Please select a file'); return; }
@@ -132,8 +150,15 @@ function ReceiptUpload() {
       clearInterval(interval);
       setUploadProgress(100);
       const data = response.data;
+
       setReceiptId(data.receiptId);
       setOcrSuccess(data.ocrSuccess);
+      setOcrMethod(data.ocrMethod || 'tesseract');
+
+      // Store AI provider error state to display in the review step
+      setAiProviderError(data.aiProviderError || false);
+      setAiProviderMessage(data.aiProviderMessage || '');
+
       setReviewHeader({
         storeName: data.extractedData?.storeName || '',
         purchaseDate: data.extractedData?.purchaseDate || new Date().toISOString().split('T')[0],
@@ -171,6 +196,9 @@ function ReceiptUpload() {
   const handleAddItem = () => setReviewItems(prev => [...prev, { productDescription: '', price: '', warrantyMonths: 12 }]);
   const handleRemoveItem = (index) => { if (reviewItems.length > 1) setReviewItems(prev => prev.filter((_, i) => i !== index)); };
 
+  /**
+   * Saves the reviewed and corrected receipt data to the backend.
+   */
   const handleSaveConfirmed = async () => {
     setSaving(true);
     setError('');
@@ -210,6 +238,8 @@ function ReceiptUpload() {
     setError('');
     setUploadProgress(0);
     setSaveSuccess(false);
+    setAiProviderError(false);
+    setAiProviderMessage('');
     if (fileInputRef.current) fileInputRef.current.value = '';
   };
 
@@ -225,14 +255,33 @@ function ReceiptUpload() {
             </Button>
             <Button variant="success" onClick={handleSaveConfirmed}
               disabled={saving || saveSuccess || !reviewHeader.storeName}>
-              {saving ? <><Spinner as="span" animation="border" size="sm" className="me-2" />Saving...</> : 'Confirm and Save Receipt'}
+              {saving
+                ? <><Spinner as="span" animation="border" size="sm" className="me-2" />Saving...</>
+                : 'Confirm and Save Receipt'}
             </Button>
           </div>
         </div>
 
-        {ocrSuccess
-          ? <Alert variant="info" className="mb-3"><strong>OCR completed.</strong> Review and correct any errors before saving.</Alert>
-          : <Alert variant="warning" className="mb-3"><strong>OCR had difficulty.</strong> Please fill in the fields manually.</Alert>}
+        {/* AI provider error — shown when OpenAI fell back to Tesseract */}
+        {aiProviderError && (
+          <Alert variant="warning" className="mb-3">
+            <strong>⚠ AI OCR unavailable.</strong> {aiProviderMessage}
+          </Alert>
+        )}
+
+        {/* Standard OCR success/failure banners (only shown when no AI error) */}
+        {!aiProviderError && ocrSuccess && (
+          <Alert variant="info" className="mb-3">
+            <strong>OCR completed{ocrMethod === 'openai' ? ' (AI-enhanced)' : ''}.</strong>{' '}
+            The information on the left was automatically extracted from your receipt.
+            Use the receipt preview on the right to verify and correct any errors before saving.
+          </Alert>
+        )}
+        {!aiProviderError && !ocrSuccess && (
+          <Alert variant="warning" className="mb-3">
+            <strong>OCR had difficulty.</strong> Please fill in the fields manually using the receipt preview.
+          </Alert>
+        )}
 
         {error && <Alert variant="danger" onClose={() => setError('')} dismissible className="mb-3">{error}</Alert>}
         {saveSuccess && <Alert variant="success" className="mb-3"><strong>Receipt saved!</strong> Redirecting...</Alert>}
@@ -274,7 +323,9 @@ function ReceiptUpload() {
 
                 <div className="d-flex justify-content-between align-items-center mb-3">
                   <strong>Items ({reviewItems.length})</strong>
-                  <Button variant="outline-primary" size="sm" onClick={handleAddItem} disabled={saving || saveSuccess}>+ Add Item</Button>
+                  <Button variant="outline-primary" size="sm" onClick={handleAddItem} disabled={saving || saveSuccess}>
+                    + Add Item
+                  </Button>
                 </div>
 
                 {reviewItems.map((item, index) => (
@@ -343,18 +394,29 @@ function ReceiptUpload() {
               <Card.Header className="bg-secondary text-white d-flex justify-content-between align-items-center">
                 <strong>{isPdf ? 'Receipt PDF' : 'Receipt Image'}</strong>
                 <div className="d-flex align-items-center gap-2">
-                  <Button variant="outline-light" size="sm" onClick={() => setZoomLevel(p => Math.max(p - ZOOM_STEP, MIN_ZOOM))} disabled={zoomLevel <= MIN_ZOOM}>−</Button>
+                  <Button variant="outline-light" size="sm"
+                    onClick={() => setZoomLevel(p => Math.max(p - ZOOM_STEP, MIN_ZOOM))}
+                    disabled={zoomLevel <= MIN_ZOOM}>−</Button>
                   <span className="text-white small" style={{ minWidth: '45px', textAlign: 'center' }}>{zoomLevel}%</span>
-                  <Button variant="outline-light" size="sm" onClick={() => setZoomLevel(p => Math.min(p + ZOOM_STEP, MAX_ZOOM))} disabled={zoomLevel >= MAX_ZOOM}>+</Button>
+                  <Button variant="outline-light" size="sm"
+                    onClick={() => setZoomLevel(p => Math.min(p + ZOOM_STEP, MAX_ZOOM))}
+                    disabled={zoomLevel >= MAX_ZOOM}>+</Button>
                   <Button variant="outline-light" size="sm" onClick={() => setZoomLevel(100)}>↺</Button>
                 </div>
               </Card.Header>
-              <Card.Body className="p-0" style={{ overflowY: 'auto', overflowX: 'auto', maxHeight: 'calc(75vh - 56px)', backgroundColor: '#f8f9fa' }}>
+              <Card.Body className="p-0" style={{
+                overflowY: 'auto', overflowX: 'auto',
+                maxHeight: 'calc(75vh - 56px)', backgroundColor: '#f8f9fa'
+              }}>
                 {fileUrl ? (
-                  <div style={{ width: `${zoomLevel}%`, minWidth: zoomLevel > 100 ? `${zoomLevel}%` : '100%', transition: 'width 0.2s ease' }}>
+                  <div style={{
+                    width: `${zoomLevel}%`,
+                    minWidth: zoomLevel > 100 ? `${zoomLevel}%` : '100%',
+                    transition: 'width 0.2s ease'
+                  }}>
                     {isPdf
-                      ? <embed src={`${fileUrl}#toolbar=0&navpanes=0&scrollbar=0`} type="application/pdf" width="100%"
-                          style={{ height: `${Math.max(600, (zoomLevel / 100) * 800)}px`, display: 'block' }} />
+                      ? <embed src={`${fileUrl}#toolbar=0&navpanes=0&scrollbar=0`} type="application/pdf"
+                          width="100%" style={{ height: `${Math.max(600, (zoomLevel / 100) * 800)}px`, display: 'block' }} />
                       : <img src={fileUrl} alt="Receipt" style={{ width: '100%', display: 'block' }} />}
                   </div>
                 ) : (
@@ -429,13 +491,18 @@ function ReceiptUpload() {
                 <div className="d-grid gap-2 d-md-flex justify-content-md-end">
                   <Button variant="outline-secondary" onClick={() => navigate('/receipts')} disabled={uploading}>Cancel</Button>
                   <Button variant="primary" type="submit" disabled={!selectedFile || uploading}>
-                    {uploading ? <><Spinner as="span" animation="border" size="sm" className="me-2" />Processing...</> : 'Upload and Process'}
+                    {uploading
+                      ? <><Spinner as="span" animation="border" size="sm" className="me-2" />Processing...</>
+                      : 'Upload and Process'}
                   </Button>
                 </div>
               </Form>
 
               <Alert variant="info" className="mt-3 mb-0">
-                <small><strong>Note:</strong> After uploading, you will review the extracted data side by side with your receipt before saving.</small>
+                <small>
+                  <strong>Note:</strong> After uploading, you will review the extracted data side by side
+                  with your receipt before saving.
+                </small>
               </Alert>
             </Card.Body>
           </Card>

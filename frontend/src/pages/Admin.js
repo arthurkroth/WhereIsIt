@@ -1,7 +1,7 @@
 /**
  * File: Admin.js
  * Author: Arthur Kroth - x22166971
- * WhereIsIt Project
+ * WhereIsIt Project.
  */
 
 import React, { useState, useEffect } from 'react';

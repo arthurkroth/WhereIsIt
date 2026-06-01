@@ -1,5 +1,6 @@
 /**
- * File: api.js
+ * API Service using Axios for making HTTP requests to the backend.
+ * Handles authentication tokens and provides methods for all API endpoints.
  * Author: Arthur Kroth - x22166971
  * WhereIsIt Project
  */
@@ -13,9 +14,6 @@ const api = axios.create({
   headers: { 'Content-Type': 'application/json' },
 });
 
-/**
- * Request interceptor — attaches JWT token to every request.
- */
 api.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem('token');
@@ -25,9 +23,6 @@ api.interceptors.request.use(
   (error) => Promise.reject(error)
 );
 
-/**
- * Response interceptor — redirects to login on 401 (except from the login endpoint itself).
- */
 api.interceptors.response.use(
   (response) => response,
   (error) => {
@@ -47,11 +42,6 @@ api.interceptors.response.use(
 export const register = (email, password, plan = 'FREE', firstName, lastName) =>
   api.post('/auth/register', { email, password, firstName, lastName });
 
-/**
- * Logs in a user with email and password.
- * Captcha fields are only included when they have a value —
- * sending null would fail Zod .optional() validation on the backend.
- */
 export const login = (email, password, captchaId = null, captchaAnswer = null) => {
   const body = { email, password };
   if (captchaId) body.captchaId = captchaId;
@@ -60,49 +50,22 @@ export const login = (email, password, captchaId = null, captchaAnswer = null) =
 };
 
 export const getCaptcha = () => api.get('/auth/captcha');
-
-/**
- * Verifies an email address using the token from the verification link.
- * Called automatically by the VerifyEmail page when it loads.
- * @param {string} token - Plain-text token from URL query parameter
- */
-export const verifyEmail = (token) =>
-  api.get(`/auth/verify-email?token=${encodeURIComponent(token)}`);
-
-/**
- * Resends the verification email to the given address.
- * Called when a user tries to log in with an unverified account.
- * @param {string} email
- */
-export const resendVerification = (email) =>
-  api.post('/auth/resend-verification', { email });
-
-export const verifyMfaLogin = (userId, token) =>
-  api.post('/auth/mfa/login-verify', { userId, token });
-
+export const verifyEmail = (token) => api.get(`/auth/verify-email?token=${encodeURIComponent(token)}`);
+export const resendVerification = (email) => api.post('/auth/resend-verification', { email });
+export const verifyMfaLogin = (userId, token) => api.post('/auth/mfa/login-verify', { userId, token });
 export const beginMfaSetup = () => api.post('/auth/mfa/begin');
-
 export const confirmMfaSetup = (token) => api.post('/auth/mfa/confirm', { token });
-
 export const disableMfa = () => api.delete('/auth/mfa');
-
 export const forgotPassword = (email) => api.post('/auth/forgot-password', { email });
-
-export const resetPassword = (token, newPassword) =>
-  api.post('/auth/reset-password', { token, newPassword });
+export const resetPassword = (token, newPassword) => api.post('/auth/reset-password', { token, newPassword });
 
 // ============================================================================
 // PROFILE
 // ============================================================================
 
 export const getProfile = () => api.get('/auth/profile');
-
-export const updateProfile = (firstName, lastName) =>
-  api.put('/auth/profile', { firstName, lastName });
-
-export const changeEmail = (newEmail, currentPassword) =>
-  api.put('/auth/change-email', { newEmail, currentPassword });
-
+export const updateProfile = (firstName, lastName) => api.put('/auth/profile', { firstName, lastName });
+export const changeEmail = (newEmail, currentPassword) => api.put('/auth/change-email', { newEmail, currentPassword });
 export const changePassword = (currentPassword, newPassword, confirmPassword) =>
   api.put('/auth/change-password', { currentPassword, newPassword, confirmPassword });
 
@@ -113,21 +76,48 @@ export const changePassword = (currentPassword, newPassword, confirmPassword) =>
 export const uploadReceipt = (file) => {
   const formData = new FormData();
   formData.append('receipt', file);
-  return api.post('/receipts/upload', formData, {
-    headers: { 'Content-Type': 'multipart/form-data' },
-  });
+  return api.post('/receipts/upload', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
 };
 
 export const createManualReceipt = (receiptData) => api.post('/receipts/manual', receiptData);
-
 export const listReceipts = () => api.get('/receipts');
-
 export const getReceiptById = (id) => api.get(`/receipts/${id}`);
-
 export const getReceiptFileUrl = (id) => {
   const token = localStorage.getItem('token');
   return `http://localhost:3001/receipts/${id}/file?token=${token}`;
 };
+
+// ============================================================================
+// PREMIUM
+// ============================================================================
+
+/**
+ * Fetches the Premium user's warranty alert preferences.
+ * @returns {Promise} Response with settings object
+ */
+export const getPremiumSettings = () => api.get('/premium/settings');
+
+/**
+ * Updates the Premium user's warranty alert preferences.
+ * @param {boolean} alertsEnabled
+ * @param {number} alertTimeframeDays - 7, 14, 30, 60, or 90
+ * @param {string} alertFrequency - 'daily', 'weekly', or 'immediate'
+ */
+export const updatePremiumSettings = (alertsEnabled, alertTimeframeDays, alertFrequency) =>
+  api.put('/premium/settings', { alertsEnabled, alertTimeframeDays, alertFrequency });
+
+/**
+ * Triggers a CSV export download of all receipts.
+ * Returns binary CSV data — must be handled with a blob download in the frontend.
+ */
+export const exportReceiptsCsv = () =>
+  api.get('/premium/export/csv', { responseType: 'blob' });
+
+/**
+ * Triggers a manual test warranty alert email.
+ * Useful for testing the alert system during development.
+ */
+export const sendTestAlert = () => api.post('/premium/alert/test');
 
 // ============================================================================
 // ADMIN
