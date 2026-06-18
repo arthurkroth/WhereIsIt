@@ -1,13 +1,14 @@
 /**
- * Profile Page
+ * File: Profile.js
  * Author: Arthur Kroth - x22166971
  * WhereIsIt Project
  *
- * Profile page with four tabs:
- * 1. Account Details  — name and email management
- * 2. Change Password  — password change with current password confirmation
- * 3. Security (MFA)   — enable/disable MFA, recovery codes, "can't scan" fallback
- * 4. Premium Settings — warranty alert preferences (PREMIUM users only)
+ * Profile page with five tabs:
+ * 1. Account Details   — name and email management
+ * 2. Change Password   — password change
+ * 3. Security (MFA)    — enable/disable MFA, recovery codes
+ * 4. Premium Settings  — warranty alert preferences (PREMIUM only)
+ * 5. Contact Support   — submit tickets, view history, reply to admin responses
  */
 
 import React, { useState, useEffect } from 'react';
@@ -20,7 +21,8 @@ import { useAuth } from '../context/AuthContext';
 import {
   getProfile, updateProfile, changeEmail, changePassword,
   beginMfaSetup, confirmMfaSetup, disableMfa,
-  getPremiumSettings, updatePremiumSettings, sendTestAlert
+  getPremiumSettings, updatePremiumSettings, sendTestAlert,
+  createSupportTicket, getUserTickets, replyToSupportTicket
 } from '../services/api';
 
 function Profile() {
@@ -30,7 +32,7 @@ function Profile() {
   const [loadingProfile, setLoadingProfile] = useState(true);
   const [profileLoadError, setProfileLoadError] = useState('');
 
-  // Tab 1: Account Details
+  // Tab 1
   const [nameForm, setNameForm] = useState({ firstName: '', lastName: '' });
   const [emailForm, setEmailForm] = useState({ newEmail: '', currentPasswordForEmail: '' });
   const [savingName, setSavingName] = useState(false);
@@ -40,7 +42,7 @@ function Profile() {
   const [emailSuccess, setEmailSuccess] = useState('');
   const [emailError, setEmailError] = useState('');
 
-  // Tab 2: Change Password
+  // Tab 2
   const [passwordForm, setPasswordForm] = useState({ currentPassword: '', newPassword: '', confirmPassword: '' });
   const [savingPassword, setSavingPassword] = useState(false);
   const [passwordSuccess, setPasswordSuccess] = useState('');
@@ -58,7 +60,7 @@ function Profile() {
   const [showRecoveryModal, setShowRecoveryModal] = useState(false);
   const [copiedCodes, setCopiedCodes] = useState(false);
 
-  // Tab 4: Premium Settings
+  // Tab 4: Premium
   const [premiumSettings, setPremiumSettings] = useState(null);
   const [loadingPremium, setLoadingPremium] = useState(false);
   const [savingPremium, setSavingPremium] = useState(false);
@@ -66,14 +68,24 @@ function Profile() {
   const [premiumError, setPremiumError] = useState('');
   const [testAlertLoading, setTestAlertLoading] = useState(false);
   const [testAlertMsg, setTestAlertMsg] = useState('');
+  const [testAlertPreviewUrl, setTestAlertPreviewUrl] = useState('');
+
+  // Tab 5: Support
+  const [supportForm, setSupportForm] = useState({ subject: '', message: '', priority: 'medium' });
+  const [supportLoading, setSupportLoading] = useState(false);
+  const [supportSuccess, setSupportSuccess] = useState('');
+  const [supportError, setSupportError] = useState('');
+  const [tickets, setTickets] = useState([]);
+  const [loadingTickets, setLoadingTickets] = useState(false);
+  // Per-ticket reply state: { [ticketId]: { text, loading, error, success } }
+  const [replyState, setReplyState] = useState({});
 
   const isPremium = profile?.role === 'PREMIUM' || user?.role === 'PREMIUM';
 
   useEffect(() => { fetchProfile(); }, []);
 
   const fetchProfile = async () => {
-    setLoadingProfile(true);
-    setProfileLoadError('');
+    setLoadingProfile(true); setProfileLoadError('');
     try {
       const response = await getProfile();
       const data = response.data.profile;
@@ -99,11 +111,21 @@ function Profile() {
     }
   };
 
+  const fetchTickets = async () => {
+    setLoadingTickets(true);
+    try {
+      const response = await getUserTickets();
+      setTickets(response.data.tickets || []);
+    } catch {} finally {
+      setLoadingTickets(false);
+    }
+  };
+
   const extractSecret = (url) => {
     try { return new URL(url).searchParams.get('secret') || null; } catch { return null; }
   };
 
-  // ── Tab 1 ────────────────────────────────────────────────────────────────
+  // ── Tab 1 ──────────────────────────────────────────────────────────────────
   const handleSaveName = async (e) => {
     e.preventDefault();
     setNameSuccess(''); setNameError('');
@@ -132,7 +154,7 @@ function Profile() {
     finally { setSavingEmail(false); }
   };
 
-  // ── Tab 2 ────────────────────────────────────────────────────────────────
+  // ── Tab 2 ──────────────────────────────────────────────────────────────────
   const handleChangePassword = async (e) => {
     e.preventDefault();
     setPasswordSuccess(''); setPasswordError('');
@@ -151,7 +173,7 @@ function Profile() {
     finally { setSavingPassword(false); }
   };
 
-  // ── Tab 3: MFA ────────────────────────────────────────────────────────────
+  // ── Tab 3: MFA ─────────────────────────────────────────────────────────────
   const handleBeginMfa = async () => {
     setMfaError(''); setMfaSuccess(''); setMfaLoading(true); setShowSecretText(false);
     try {
@@ -189,7 +211,7 @@ function Profile() {
     finally { setMfaLoading(false); }
   };
 
-  const handleResetMfa = () => {
+  const handleResetMfaSetup = () => {
     setMfaStep('idle'); setOtpauthUrl(''); setMfaToken('');
     setMfaError(''); setMfaSuccess(''); setShowSecretText(false);
   };
@@ -201,7 +223,7 @@ function Profile() {
     });
   };
 
-  // ── Tab 4: Premium Settings ───────────────────────────────────────────────
+  // ── Tab 4: Premium ─────────────────────────────────────────────────────────
   const handleSavePremiumSettings = async (e) => {
     e.preventDefault();
     setPremiumSuccess(''); setPremiumError('');
@@ -217,8 +239,6 @@ function Profile() {
     finally { setSavingPremium(false); }
   };
 
-  const [testAlertPreviewUrl, setTestAlertPreviewUrl] = useState('');
-
   const handleSendTestAlert = async () => {
     setTestAlertLoading(true); setTestAlertMsg(''); setTestAlertPreviewUrl('');
     try {
@@ -227,6 +247,84 @@ function Profile() {
       setTestAlertPreviewUrl(response.data.previewUrl || '');
     } catch { setTestAlertMsg('Failed to send test alert.'); }
     finally { setTestAlertLoading(false); }
+  };
+
+  // ── Tab 5: Support ─────────────────────────────────────────────────────────
+  const handleSubmitTicket = async (e) => {
+    e.preventDefault();
+    setSupportSuccess(''); setSupportError('');
+    if (!supportForm.subject.trim() || supportForm.subject.trim().length < 5) {
+      setSupportError('Subject must be at least 5 characters'); return;
+    }
+    if (!supportForm.message.trim() || supportForm.message.trim().length < 10) {
+      setSupportError('Message must be at least 10 characters'); return;
+    }
+    setSupportLoading(true);
+    try {
+      await createSupportTicket(supportForm.subject.trim(), supportForm.message.trim(), supportForm.priority);
+      setSupportSuccess('Your support request has been submitted. We will respond within 24 hours.');
+      setSupportForm({ subject: '', message: '', priority: 'medium' });
+      fetchTickets();
+    } catch (err) {
+      setSupportError(err.response?.data?.error || 'Failed to submit ticket. Please try again.');
+    } finally {
+      setSupportLoading(false);
+    }
+  };
+
+  /**
+   * Updates the reply text for a specific ticket in the per-ticket state map.
+   */
+  const setReplyText = (ticketId, text) => {
+    setReplyState(prev => ({ ...prev, [ticketId]: { ...prev[ticketId], text } }));
+  };
+
+  /**
+   * Submits the user's reply to a specific ticket.
+   * Sets status to in_progress and saves the reply text.
+   */
+  const handleSubmitReply = async (ticketId) => {
+    const text = replyState[ticketId]?.text || '';
+    if (text.trim().length < 5) {
+      setReplyState(prev => ({ ...prev, [ticketId]: { ...prev[ticketId], error: 'Reply must be at least 5 characters' } }));
+      return;
+    }
+    setReplyState(prev => ({ ...prev, [ticketId]: { ...prev[ticketId], loading: true, error: '', success: '' } }));
+    try {
+      await replyToSupportTicket(ticketId, text.trim());
+      setReplyState(prev => ({
+        ...prev,
+        [ticketId]: { text: '', loading: false, error: '', success: 'Reply submitted successfully.' }
+      }));
+      fetchTickets(); // Refresh to show the saved reply
+    } catch (err) {
+      setReplyState(prev => ({
+        ...prev,
+        [ticketId]: {
+          ...prev[ticketId],
+          loading: false,
+          error: err.response?.data?.error || 'Failed to submit reply'
+        }
+      }));
+    }
+  };
+
+  const getStatusBadge = (status) => {
+    if (status === 'open')        return <Badge bg="danger">Open</Badge>;
+    if (status === 'in_progress') return <Badge bg="warning" text="dark">In Progress</Badge>;
+    if (status === 'resolved')    return <Badge bg="success">Resolved</Badge>;
+    return <Badge bg="secondary">{status}</Badge>;
+  };
+
+  const getPriorityBadge = (priority) => {
+    if (priority === 'high')   return <Badge bg="danger">High</Badge>;
+    if (priority === 'medium') return <Badge bg="warning" text="dark">Medium</Badge>;
+    return <Badge bg="secondary">Low</Badge>;
+  };
+
+  const formatDate = (ts) => {
+    if (!ts) return '—';
+    return new Date(ts).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
   };
 
   if (loadingProfile) return (
@@ -275,11 +373,16 @@ function Profile() {
               </Nav.Link>
             </Nav.Item>
           )}
+          <Nav.Item>
+            <Nav.Link eventKey="support" onClick={() => tickets.length === 0 && fetchTickets()}>
+              Contact Support
+            </Nav.Link>
+          </Nav.Item>
         </Nav>
 
         <Tab.Content>
 
-          {/* ── Tab 1: Account Details ──────────────────────────────────────── */}
+          {/* ── Tab 1: Account Details ──────────────────────────────────── */}
           <Tab.Pane eventKey="details">
             <Row>
               <Col md={6} className="mb-4">
@@ -294,16 +397,14 @@ function Profile() {
                           <Form.Group className="mb-3">
                             <Form.Label>First Name <span className="text-danger">*</span></Form.Label>
                             <Form.Control type="text" value={nameForm.firstName}
-                              onChange={(e) => setNameForm(p => ({ ...p, firstName: e.target.value }))}
-                              disabled={savingName} />
+                              onChange={(e) => setNameForm(p => ({ ...p, firstName: e.target.value }))} disabled={savingName} />
                           </Form.Group>
                         </Col>
                         <Col md={6}>
                           <Form.Group className="mb-3">
                             <Form.Label>Last Name <span className="text-danger">*</span></Form.Label>
                             <Form.Control type="text" value={nameForm.lastName}
-                              onChange={(e) => setNameForm(p => ({ ...p, lastName: e.target.value }))}
-                              disabled={savingName} />
+                              onChange={(e) => setNameForm(p => ({ ...p, lastName: e.target.value }))} disabled={savingName} />
                           </Form.Group>
                         </Col>
                       </Row>
@@ -314,7 +415,6 @@ function Profile() {
                   </Card.Body>
                 </Card>
               </Col>
-
               <Col md={6} className="mb-4">
                 <Card>
                   <Card.Header className="bg-primary text-white"><strong>Email Address</strong></Card.Header>
@@ -332,9 +432,7 @@ function Profile() {
                           onChange={(e) => setEmailForm(p => ({ ...p, newEmail: e.target.value }))} disabled={savingEmail} />
                       </Form.Group>
                       <Form.Group className="mb-3">
-                        <Form.Label>Current Password <span className="text-danger">*</span>
-                          <small className="text-muted ms-1">(required to confirm)</small>
-                        </Form.Label>
+                        <Form.Label>Current Password <span className="text-danger">*</span></Form.Label>
                         <Form.Control type="password" value={emailForm.currentPasswordForEmail}
                           onChange={(e) => setEmailForm(p => ({ ...p, currentPasswordForEmail: e.target.value }))} disabled={savingEmail} />
                       </Form.Group>
@@ -348,7 +446,7 @@ function Profile() {
             </Row>
           </Tab.Pane>
 
-          {/* ── Tab 2: Change Password ──────────────────────────────────────── */}
+          {/* ── Tab 2: Change Password ──────────────────────────────────── */}
           <Tab.Pane eventKey="password">
             <Row className="justify-content-center">
               <Col md={6}>
@@ -369,7 +467,7 @@ function Profile() {
                         <Form.Control type="password" value={passwordForm.newPassword}
                           onChange={(e) => setPasswordForm(p => ({ ...p, newPassword: e.target.value }))}
                           disabled={savingPassword} autoComplete="new-password" />
-                        <Form.Text className="text-muted">Min 12 chars with uppercase, lowercase, number, special character.</Form.Text>
+                        <Form.Text className="text-muted">Min 12 chars — uppercase, lowercase, number, special character.</Form.Text>
                       </Form.Group>
                       <Form.Group className="mb-4">
                         <Form.Label>Confirm New Password <span className="text-danger">*</span></Form.Label>
@@ -387,7 +485,7 @@ function Profile() {
             </Row>
           </Tab.Pane>
 
-          {/* ── Tab 3: Security (MFA) ───────────────────────────────────────── */}
+          {/* ── Tab 3: Security (MFA) ───────────────────────────────────── */}
           <Tab.Pane eventKey="security">
             <Row className="justify-content-center">
               <Col md={7}>
@@ -456,7 +554,7 @@ function Profile() {
                           <Button variant="primary" type="submit" disabled={mfaLoading || mfaToken.length < 6}>
                             {mfaLoading ? <><Spinner as="span" animation="border" size="sm" className="me-2" />Verifying...</> : 'Verify and Enable'}
                           </Button>
-                          <Button variant="outline-secondary" onClick={handleResetMfa} disabled={mfaLoading}>Cancel</Button>
+                          <Button variant="outline-secondary" onClick={handleResetMfaSetup} disabled={mfaLoading}>Cancel</Button>
                         </div>
                       </Form>
                     </Card.Body>
@@ -467,13 +565,10 @@ function Profile() {
                     <Card.Body className="text-center">
                       <div className="text-success mb-3" style={{ fontSize: '4rem' }}>✓</div>
                       <h4 className="text-success mb-3">MFA Successfully Enabled!</h4>
-                      <Alert variant="warning" className="text-start">
-                        <strong>Your recovery codes were shown once.</strong> If you missed them, click below to view again.
-                      </Alert>
                       {recoveryCodes.length > 0 && (
                         <Button variant="outline-primary" className="me-2" onClick={() => setShowRecoveryModal(true)}>View Recovery Codes</Button>
                       )}
-                      <Button variant="outline-secondary" onClick={handleResetMfa}>Set Up Another Device</Button>
+                      <Button variant="outline-secondary" onClick={handleResetMfaSetup}>Set Up Another Device</Button>
                     </Card.Body>
                   </Card>
                 )}
@@ -481,7 +576,7 @@ function Profile() {
             </Row>
           </Tab.Pane>
 
-          {/* ── Tab 4: Premium Settings (PREMIUM only) ──────────────────────── */}
+          {/* ── Tab 4: Premium Settings ─────────────────────────────────── */}
           {isPremium && (
             <Tab.Pane eventKey="premium">
               <Row className="justify-content-center">
@@ -494,24 +589,17 @@ function Profile() {
                     <Card.Body>
                       {premiumSuccess && <Alert variant="success" dismissible onClose={() => setPremiumSuccess('')}>{premiumSuccess}</Alert>}
                       {premiumError && <Alert variant="danger" dismissible onClose={() => setPremiumError('')}>{premiumError}</Alert>}
-
                       {loadingPremium ? (
                         <div className="text-center py-3"><Spinner animation="border" variant="primary" /></div>
                       ) : !premiumSettings ? (
-                        <div className="text-center">
-                          <Button variant="primary" onClick={fetchPremiumSettings}>Load Settings</Button>
-                        </div>
+                        <div className="text-center"><Button variant="primary" onClick={fetchPremiumSettings}>Load Settings</Button></div>
                       ) : (
                         <Form noValidate onSubmit={handleSavePremiumSettings}>
                           <Form.Group className="mb-3">
                             <Form.Check type="switch" id="alertsEnabled" label="Enable warranty expiry email alerts"
                               checked={premiumSettings.alertsEnabled}
                               onChange={(e) => setPremiumSettings(p => ({ ...p, alertsEnabled: e.target.checked }))} />
-                            <Form.Text className="text-muted">
-                              Receive email notifications before warranties expire.
-                            </Form.Text>
                           </Form.Group>
-
                           <Form.Group className="mb-3">
                             <Form.Label>Alert me when a warranty expires within</Form.Label>
                             <Form.Select value={premiumSettings.alertTimeframeDays}
@@ -524,26 +612,21 @@ function Profile() {
                               <option value={90}>90 days</option>
                             </Form.Select>
                           </Form.Group>
-
                           <Form.Group className="mb-4">
                             <Form.Label>Email frequency</Form.Label>
                             <Form.Select value={premiumSettings.alertFrequency}
                               onChange={(e) => setPremiumSettings(p => ({ ...p, alertFrequency: e.target.value }))}
                               disabled={!premiumSettings.alertsEnabled}>
-                              <option value="daily">Daily digest — one email per day with all expiring items</option>
-                              <option value="weekly">Weekly summary — sent every Monday morning</option>
-                              <option value="immediate">Immediate — one email per expiring item</option>
+                              <option value="daily">Daily digest</option>
+                              <option value="weekly">Weekly summary (Mondays)</option>
+                              <option value="immediate">Immediate — one email per item</option>
                             </Form.Select>
                           </Form.Group>
-
                           {premiumSettings.lastAlertSent && (
                             <Alert variant="light" className="mb-3">
-                              <small className="text-muted">
-                                Last alert sent: {new Date(premiumSettings.lastAlertSent).toLocaleString('en-GB')}
-                              </small>
+                              <small className="text-muted">Last alert sent: {new Date(premiumSettings.lastAlertSent).toLocaleString('en-GB')}</small>
                             </Alert>
                           )}
-
                           <div className="d-flex gap-2 flex-wrap">
                             <Button variant="warning" type="submit" disabled={savingPremium}>
                               {savingPremium ? <><Spinner as="span" animation="border" size="sm" className="me-2" />Saving...</> : 'Save Preferences'}
@@ -552,19 +635,17 @@ function Profile() {
                               {testAlertLoading ? <><Spinner as="span" animation="border" size="sm" className="me-2" />Sending...</> : 'Send Test Alert'}
                             </Button>
                           </div>
-                            {testAlertMsg && (
-                              <Alert variant="info" className="mt-3 mb-0">
-                                {testAlertMsg}
-                                {testAlertPreviewUrl && (
-                                  <div className="mt-2">
-                                    <a href={testAlertPreviewUrl} target="_blank" rel="noopener noreferrer"
-                                      className="btn btn-sm btn-outline-primary">
-                                      📧 Open Email Preview
-                                    </a>
-                                  </div>
-                                )}
-                              </Alert>
-                            )}
+                          {testAlertMsg && (
+                            <Alert variant="info" className="mt-3 mb-0">
+                              {testAlertMsg}
+                              {testAlertPreviewUrl && (
+                                <div className="mt-2">
+                                  <a href={testAlertPreviewUrl} target="_blank" rel="noopener noreferrer"
+                                    className="btn btn-sm btn-outline-primary">📧 Open Email Preview</a>
+                                </div>
+                              )}
+                            </Alert>
+                          )}
                         </Form>
                       )}
                     </Card.Body>
@@ -573,6 +654,157 @@ function Profile() {
               </Row>
             </Tab.Pane>
           )}
+
+          {/* ── Tab 5: Contact Support ──────────────────────────────────── */}
+          <Tab.Pane eventKey="support">
+            <Row>
+              {/* Submit new ticket */}
+              <Col md={6} className="mb-4">
+                <Card>
+                  <Card.Header className="bg-primary text-white"><strong>Submit a Support Request</strong></Card.Header>
+                  <Card.Body>
+                    {supportSuccess && <Alert variant="success" dismissible onClose={() => setSupportSuccess('')}>{supportSuccess}</Alert>}
+                    {supportError && <Alert variant="danger" dismissible onClose={() => setSupportError('')}>{supportError}</Alert>}
+                    <Form noValidate onSubmit={handleSubmitTicket}>
+                      <Form.Group className="mb-3">
+                        <Form.Label>Subject <span className="text-danger">*</span></Form.Label>
+                        <Form.Control type="text" value={supportForm.subject}
+                          onChange={(e) => setSupportForm(p => ({ ...p, subject: e.target.value }))}
+                          placeholder="Brief description of your issue"
+                          maxLength={200} disabled={supportLoading} />
+                        <Form.Text className="text-muted">{supportForm.subject.length}/200</Form.Text>
+                      </Form.Group>
+                      <Form.Group className="mb-3">
+                        <Form.Label>Priority</Form.Label>
+                        <Form.Select value={supportForm.priority}
+                          onChange={(e) => setSupportForm(p => ({ ...p, priority: e.target.value }))}
+                          disabled={supportLoading}>
+                          <option value="low">Low — general question or feedback</option>
+                          <option value="medium">Medium — issue affecting normal use</option>
+                          <option value="high">High — urgent, can't use the app</option>
+                        </Form.Select>
+                      </Form.Group>
+                      <Form.Group className="mb-4">
+                        <Form.Label>Message <span className="text-danger">*</span></Form.Label>
+                        <Form.Control as="textarea" rows={5} value={supportForm.message}
+                          onChange={(e) => setSupportForm(p => ({ ...p, message: e.target.value }))}
+                          placeholder="Describe your issue in detail..." disabled={supportLoading} />
+                      </Form.Group>
+                      <Button variant="primary" type="submit" disabled={supportLoading}>
+                        {supportLoading ? <><Spinner as="span" animation="border" size="sm" className="me-2" />Submitting...</> : 'Submit Request'}
+                      </Button>
+                    </Form>
+                  </Card.Body>
+                </Card>
+              </Col>
+
+              {/* Ticket history with reply capability */}
+              <Col md={6}>
+                <Card>
+                  <Card.Header className="d-flex justify-content-between align-items-center">
+                    <strong>My Support Tickets</strong>
+                    <Button variant="link" size="sm" onClick={fetchTickets} disabled={loadingTickets}>
+                      {loadingTickets ? <Spinner as="span" animation="border" size="sm" /> : '↻ Refresh'}
+                    </Button>
+                  </Card.Header>
+                  <Card.Body className="p-0">
+                    {loadingTickets ? (
+                      <div className="text-center py-4"><Spinner animation="border" variant="primary" /></div>
+                    ) : tickets.length === 0 ? (
+                      <div className="text-center py-4 text-muted"><small>No support tickets yet.</small></div>
+                    ) : (
+                      <div style={{ maxHeight: '600px', overflowY: 'auto' }}>
+                        {tickets.map(ticket => {
+                          const rs = replyState[ticket.id] || {};
+                          const canReply = ticket.status !== 'resolved';
+                          return (
+                            <div key={ticket.id} className="p-3 border-bottom">
+                              {/* Ticket header */}
+                              <div className="d-flex justify-content-between align-items-start mb-1">
+                                <strong style={{ fontSize: '0.9rem' }}>{ticket.subject}</strong>
+                                <div className="d-flex gap-1 flex-shrink-0 ms-2">
+                                  {getStatusBadge(ticket.status)}
+                                  {getPriorityBadge(ticket.priority)}
+                                </div>
+                              </div>
+                              <small className="text-muted d-block mb-2">Submitted {formatDate(ticket.created_at)}</small>
+
+                              {/* Original message */}
+                              <div className="p-2 bg-light rounded mb-2" style={{ fontSize: '0.85rem' }}>
+                                <strong className="d-block mb-1 text-secondary" style={{ fontSize: '0.75rem' }}>Your message:</strong>
+                                {ticket.message}
+                              </div>
+
+                              {/* Admin response */}
+                              {ticket.admin_response && (
+                                <div className="p-2 rounded border-start border-primary border-3 bg-white mb-2" style={{ fontSize: '0.85rem' }}>
+                                  <strong className="d-block mb-1 text-primary" style={{ fontSize: '0.75rem' }}>Support response:</strong>
+                                  {ticket.admin_response}
+                                </div>
+                              )}
+
+                              {/* User's previous reply (if any) */}
+                              {ticket.user_reply && (
+                                <div className="p-2 rounded border-start border-secondary border-3 bg-light mb-2" style={{ fontSize: '0.85rem' }}>
+                                  <strong className="d-block mb-1 text-secondary" style={{ fontSize: '0.75rem' }}>
+                                    Your reply — {formatDate(ticket.user_replied_at)}:
+                                  </strong>
+                                  {ticket.user_reply}
+                                </div>
+                              )}
+
+                              {/* Reply form — shown when ticket is not resolved */}
+                              {canReply && ticket.admin_response && (
+                                <div className="mt-2">
+                                  {rs.success && (
+                                    <Alert variant="success" className="py-1 px-2 mb-2" style={{ fontSize: '0.82rem' }}>
+                                      {rs.success}
+                                    </Alert>
+                                  )}
+                                  {rs.error && (
+                                    <Alert variant="danger" className="py-1 px-2 mb-2" style={{ fontSize: '0.82rem' }}>
+                                      {rs.error}
+                                    </Alert>
+                                  )}
+                                  <Form.Control
+                                    as="textarea"
+                                    rows={2}
+                                    placeholder="Reply to support..."
+                                    value={rs.text || ''}
+                                    onChange={(e) => setReplyText(ticket.id, e.target.value)}
+                                    disabled={rs.loading}
+                                    style={{ fontSize: '0.85rem' }}
+                                    className="mb-2"
+                                  />
+                                  <Button
+                                    variant="outline-primary"
+                                    size="sm"
+                                    onClick={() => handleSubmitReply(ticket.id)}
+                                    disabled={rs.loading || !rs.text?.trim()}
+                                  >
+                                    {rs.loading
+                                      ? <><Spinner as="span" animation="border" size="sm" className="me-1" />Sending...</>
+                                      : 'Send Reply'}
+                                  </Button>
+                                </div>
+                              )}
+
+                              {/* Resolved notice */}
+                              {ticket.status === 'resolved' && (
+                                <div className="mt-2">
+                                  <small className="text-success">✓ This ticket has been resolved.</small>
+                                </div>
+                              )}
+                            </div>
+                          );
+                        })}
+                      </div>
+                    )}
+                  </Card.Body>
+                </Card>
+              </Col>
+            </Row>
+          </Tab.Pane>
 
         </Tab.Content>
       </Tab.Container>

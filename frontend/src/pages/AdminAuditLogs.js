@@ -2,249 +2,247 @@
  * File: AdminAuditLogs.js
  * Author: Arthur Kroth - x22166971
  * WhereIsIt Project
+ *
+ * Enhanced admin audit log viewer.
+ * Replaces the previous basic version with:
+ * - Date range filter
+ * - Event type filter (dropdown of unique actions)
+ * - User ID search
+ * - Entry limit selector (50 / 100 / 250 / 500)
+ * - Severity colour-coding (critical, security, info)
+ * - Admin action highlighting
  */
 
 import React, { useState, useEffect } from 'react';
-import { Container, Card, Table, Badge, Alert, Spinner, Form, InputGroup, Button } from 'react-bootstrap';
+import { useNavigate } from 'react-router-dom';
+import {
+  Container, Card, Table, Badge, Button,
+  Alert, Spinner, Form, InputGroup, Row, Col
+} from 'react-bootstrap';
 import { getAuditLogs } from '../services/api';
 
-/**
- * AdminAuditLogs Page
- * Displays system audit logs for administrative monitoring and security analysis.
- * 
- * SECURITY:
- * - Requires ADMIN role (enforced by backend and AdminRoute component)
- * - Shows user actions for security monitoring
- * - Helps detect suspicious activity
- * - No sensitive data exposed in logs (per GDPR compliance)
- * 
- * FEATURES:
- * - Lists all audit log entries
- * - Real-time filtering by action type
- * - Search by user ID or details
- * - Color-coded action types
- */
 function AdminAuditLogs() {
+  const navigate = useNavigate();
+
   const [logs, setLogs] = useState([]);
-  const [filteredLogs, setFilteredLogs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+
+  // Filter state
   const [searchTerm, setSearchTerm] = useState('');
-  const [filterAction, setFilterAction] = useState('all');
+  const [actionFilter, setActionFilter] = useState('');
+  const [userId, setUserId] = useState('');
+  const [dateFrom, setDateFrom] = useState('');
+  const [dateTo, setDateTo] = useState('');
+  const [limit, setLimit] = useState('100');
 
-  /**
-   * Fetches audit logs when component mounts.
-   */
-  useEffect(() => {
-    fetchLogs();
-  }, []);
+  useEffect(() => { fetchLogs(); }, []);
 
-  /**
-   * Fetches audit logs from backend.
-   */
   const fetchLogs = async () => {
-    setLoading(true);
-    setError('');
-
+    setLoading(true); setError('');
     try {
-      const response = await getAuditLogs();
+      const response = await getAuditLogs({
+        q: searchTerm, action: actionFilter, userId, dateFrom, dateTo, limit
+      });
       setLogs(response.data.logs || []);
     } catch (err) {
-      setError(err.response?.data?.message || 'Failed to load audit logs');
+      setError(err.response?.data?.error || 'Failed to load audit logs');
     } finally {
       setLoading(false);
     }
   };
 
-  /**
-   * Applies filters whenever logs or filter criteria change.
-   */
-  useEffect(() => {
-    let filtered = [...logs];
-
-    // Apply search filter
-    if (searchTerm) {
-      const term = searchTerm.toLowerCase();
-      filtered = filtered.filter(
-        (log) =>
-          log.action.toLowerCase().includes(term) ||
-          log.details.toLowerCase().includes(term) ||
-          (log.user_id && log.user_id.toString().includes(term))
-      );
-    }
-
-    // Apply action filter
-    if (filterAction !== 'all') {
-      filtered = filtered.filter((log) => log.action === filterAction);
-    }
-
-    setFilteredLogs(filtered);
-  }, [logs, searchTerm, filterAction]);
-
-  /**
-   * Gets unique action types from logs for filter dropdown.
-   * @returns {Array<string>} Array of unique action types
-   */
-  const getUniqueActions = () => {
-    const actions = logs.map((log) => log.action);
-    return [...new Set(actions)].sort();
-  };
-
-  /**
-   * Returns appropriate Badge variant based on action type.
-   * @param {string} action - Action type
-   * @returns {string} Bootstrap variant
-   */
-  const getActionBadgeVariant = (action) => {
-    if (action.includes('LOGIN')) return 'success';
-    if (action.includes('REGISTER')) return 'info';
-    if (action.includes('MFA')) return 'warning';
-    if (action.includes('RECEIPT')) return 'primary';
-    if (action.includes('FAIL') || action.includes('ERROR')) return 'danger';
-    return 'secondary';
-  };
-
-  /**
-   * Formats timestamp for display.
-   * @param {string} timestamp - ISO timestamp
-   * @returns {string} Formatted timestamp
-   */
-  const formatTimestamp = (timestamp) => {
-    const date = new Date(timestamp);
-    return date.toLocaleString('en-GB', {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-    });
-  };
-
-  /**
-   * Handles log refresh.
-   */
-  const handleRefresh = () => {
+  const handleApplyFilters = (e) => {
+    e.preventDefault();
     fetchLogs();
   };
 
+  const handleClearFilters = () => {
+    setSearchTerm(''); setActionFilter('');
+    setUserId(''); setDateFrom(''); setDateTo(''); setLimit('100');
+    // Fetch with cleared values immediately
+    setLoading(true);
+    getAuditLogs({ limit: '100' })
+      .then(r => setLogs(r.data.logs || []))
+      .catch(() => setError('Failed to load logs'))
+      .finally(() => setLoading(false));
+  };
+
+  // Get unique action types for the filter dropdown
+  const uniqueActions = [...new Set(logs.map(l => l.action))].sort();
+
+  /**
+   * Classifies an action string into a severity level.
+   * Used to colour-code rows and badges.
+   */
+  const getSeverity = (action) => {
+    if (!action) return 'info';
+    const a = action.toUpperCase();
+    if (a.includes('SUSPEND') || a.includes('MFA_RESET') || a.includes('FAIL') ||
+        a.includes('CAPTCHA') || a.includes('ERROR')) return 'critical';
+    if (a.includes('ADMIN_') || a.includes('PASSWORD') || a.includes('MFA') ||
+        a.includes('LOGIN')) return 'security';
+    return 'info';
+  };
+
+  const getActionBadgeVariant = (action) => {
+    const sev = getSeverity(action);
+    if (sev === 'critical') return 'danger';
+    if (sev === 'security') return 'warning';
+    return 'secondary';
+  };
+
+  const getRowClass = (action) => {
+    const sev = getSeverity(action);
+    if (sev === 'critical') return 'table-danger';
+    if (sev === 'security') return 'table-warning';
+    return '';
+  };
+
+  const formatDate = (ts) => {
+    if (!ts) return '—';
+    return new Date(ts).toLocaleString('en-GB', {
+      day: '2-digit', month: 'short', year: 'numeric',
+      hour: '2-digit', minute: '2-digit', second: '2-digit'
+    });
+  };
+
+  const hasActiveFilters = searchTerm || actionFilter || userId || dateFrom || dateTo || limit !== '100';
+
   return (
-    <Container className="mt-4">
+    <Container className="mt-0">
       <div className="d-flex justify-content-between align-items-center mb-4">
-        <h2>
-          <i className="bi bi-shield-lock me-2"></i>
-          Audit Logs
-        </h2>
-        <Button variant="primary" onClick={handleRefresh} disabled={loading}>
-          <i className="bi bi-arrow-clockwise me-2"></i>
-          Refresh
+        <div>
+          <Button variant="outline-secondary" size="sm" className="me-3"
+            onClick={() => navigate('/admin/dashboard')}>← Dashboard</Button>
+          <strong className="fs-4">Audit Logs</strong>
+        </div>
+        <Button variant="outline-secondary" size="sm" onClick={fetchLogs} disabled={loading}>
+          ↻ Refresh
         </Button>
       </div>
 
-      {error && (
-        <Alert variant="danger" onClose={() => setError('')} dismissible>
-          {error}
-        </Alert>
-      )}
+      {error && <Alert variant="danger" dismissible onClose={() => setError('')}>{error}</Alert>}
 
-      {/* Search and Filter Controls */}
+      {/* Severity legend */}
+      <div className="d-flex gap-3 mb-3 align-items-center">
+        <small className="text-muted fw-semibold">Severity:</small>
+        <span className="badge bg-danger">Critical (suspensions, failures)</span>
+        <span className="badge bg-warning text-dark">Security (admin actions, logins, MFA)</span>
+        <span className="badge bg-secondary">Info (standard user actions)</span>
+      </div>
+
+      {/* Filters */}
       <Card className="mb-4">
         <Card.Body>
-          <div className="row g-3">
-            <div className="col-md-8">
-              <InputGroup>
-                <InputGroup.Text>
-                  <i className="bi bi-search"></i>
-                </InputGroup.Text>
-                <Form.Control
-                  type="text"
-                  placeholder="Search by action, user ID, or details..."
-                  value={searchTerm}
-                  onChange={(e) => setSearchTerm(e.target.value)}
-                />
-                {searchTerm && (
-                  <Button variant="outline-secondary" onClick={() => setSearchTerm('')}>
-                    Clear
-                  </Button>
+          <Form noValidate onSubmit={handleApplyFilters}>
+            <Row className="g-2 mb-2">
+              <Col md={4}>
+                <Form.Label className="small fw-semibold">Search</Form.Label>
+                <InputGroup>
+                  <Form.Control type="text" placeholder="Search actions or details..."
+                    value={searchTerm} onChange={(e) => setSearchTerm(e.target.value)} />
+                  {searchTerm && <Button variant="outline-secondary" onClick={() => setSearchTerm('')}>✕</Button>}
+                </InputGroup>
+              </Col>
+              <Col md={3}>
+                <Form.Label className="small fw-semibold">Event Type</Form.Label>
+                <Form.Select value={actionFilter} onChange={(e) => setActionFilter(e.target.value)}>
+                  <option value="">All Events</option>
+                  {uniqueActions.map(a => <option key={a} value={a}>{a}</option>)}
+                </Form.Select>
+              </Col>
+              <Col md={2}>
+                <Form.Label className="small fw-semibold">User ID</Form.Label>
+                <Form.Control type="number" placeholder="User ID"
+                  value={userId} onChange={(e) => setUserId(e.target.value)} />
+              </Col>
+              <Col md={1}>
+                <Form.Label className="small fw-semibold">Limit</Form.Label>
+                <Form.Select value={limit} onChange={(e) => setLimit(e.target.value)}>
+                  <option value="50">50</option>
+                  <option value="100">100</option>
+                  <option value="250">250</option>
+                  <option value="500">500</option>
+                </Form.Select>
+              </Col>
+            </Row>
+            <Row className="g-2">
+              <Col md={3}>
+                <Form.Label className="small fw-semibold">Date From</Form.Label>
+                <Form.Control type="date" value={dateFrom} onChange={(e) => setDateFrom(e.target.value)} />
+              </Col>
+              <Col md={3}>
+                <Form.Label className="small fw-semibold">Date To</Form.Label>
+                <Form.Control type="date" value={dateTo} onChange={(e) => setDateTo(e.target.value)} />
+              </Col>
+              <Col md={2} className="d-flex align-items-end gap-2">
+                <Button variant="primary" type="submit" disabled={loading}>Apply</Button>
+                {hasActiveFilters && (
+                  <Button variant="outline-secondary" onClick={handleClearFilters} disabled={loading}>Clear</Button>
                 )}
-              </InputGroup>
-            </div>
-            <div className="col-md-4">
-              <Form.Select
-                value={filterAction}
-                onChange={(e) => setFilterAction(e.target.value)}
-              >
-                <option value="all">All Actions</option>
-                {getUniqueActions().map((action) => (
-                  <option key={action} value={action}>
-                    {action}
-                  </option>
-                ))}
-              </Form.Select>
-            </div>
-          </div>
+              </Col>
+            </Row>
+          </Form>
         </Card.Body>
       </Card>
 
       {loading ? (
-        <div className="text-center my-5">
+        <div className="text-center py-5">
           <Spinner animation="border" variant="primary" />
           <p className="mt-3">Loading audit logs...</p>
         </div>
-      ) : filteredLogs.length === 0 ? (
+      ) : logs.length === 0 ? (
         <Card>
           <Card.Body className="text-center py-5">
-            <i className="bi bi-file-text display-1 text-muted"></i>
-            <h4 className="mt-3">
-              {logs.length === 0 ? 'No audit logs yet' : 'No matching logs'}
-            </h4>
+            <h5>{hasActiveFilters ? 'No matching logs' : 'No audit logs yet'}</h5>
             <p className="text-muted">
-              {logs.length === 0
-                ? 'Audit logs will appear here as users interact with the system'
-                : 'Try adjusting your search or filter criteria'}
+              {hasActiveFilters
+                ? 'Try adjusting your filters.'
+                : 'Audit logs will appear here as users interact with the system.'}
             </p>
+            {hasActiveFilters && (
+              <Button variant="outline-secondary" onClick={handleClearFilters}>Clear Filters</Button>
+            )}
           </Card.Body>
         </Card>
       ) : (
         <Card>
           <Card.Body className="p-0">
             <div className="table-responsive">
-              <Table hover className="mb-0">
+              <Table hover size="sm" className="mb-0">
                 <thead className="table-dark">
                   <tr>
-                    <th style={{ width: '80px' }}>ID</th>
-                    <th style={{ width: '100px' }}>User ID</th>
-                    <th style={{ width: '200px' }}>Action</th>
+                    <th style={{ width: '60px' }}>ID</th>
+                    <th style={{ width: '100px' }}>User</th>
+                    <th style={{ width: '220px' }}>Action</th>
                     <th>Details</th>
-                    <th style={{ width: '200px' }}>Timestamp</th>
+                    <th style={{ width: '120px' }}>IP</th>
+                    <th style={{ width: '180px' }}>Timestamp</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredLogs.map((log) => (
-                    <tr key={log.id}>
-                      <td>
-                        <code>#{log.id}</code>
-                      </td>
+                  {logs.map(log => (
+                    <tr key={log.id} className={getRowClass(log.action)}>
+                      <td><code style={{ fontSize: '0.75rem' }}>#{log.id}</code></td>
                       <td>
                         {log.user_id ? (
-                          <Badge bg="secondary">User {log.user_id}</Badge>
-                        ) : (
-                          <span className="text-muted">—</span>
-                        )}
+                          <Button variant="link" size="sm" className="p-0 text-decoration-none"
+                            style={{ fontSize: '0.8rem' }}
+                            onClick={() => navigate(`/admin/users/${log.user_id}`)}>
+                            #{log.user_id}
+                            {log.first_name && <span className="text-muted ms-1">({log.first_name})</span>}
+                          </Button>
+                        ) : <span className="text-muted">—</span>}
                       </td>
                       <td>
-                        <Badge bg={getActionBadgeVariant(log.action)}>
+                        <Badge bg={getActionBadgeVariant(log.action)} style={{ fontSize: '0.65rem', wordBreak: 'break-all' }}>
                           {log.action}
                         </Badge>
                       </td>
-                      <td>
-                        <small>{log.details}</small>
-                      </td>
-                      <td>
-                        <small className="text-muted">
-                          {formatTimestamp(log.created_at)}
-                        </small>
-                      </td>
+                      <td><small style={{ fontSize: '0.8rem' }}>{log.details}</small></td>
+                      <td><small className="text-muted font-monospace" style={{ fontSize: '0.75rem' }}>{log.ip_address || '—'}</small></td>
+                      <td><small className="text-muted" style={{ fontSize: '0.75rem' }}>{formatDate(log.created_at)}</small></td>
                     </tr>
                   ))}
                 </tbody>
@@ -252,16 +250,11 @@ function AdminAuditLogs() {
             </div>
           </Card.Body>
           <Card.Footer className="text-muted">
-            Showing {filteredLogs.length} of {logs.length} log entries
+            Showing {logs.length} log entr{logs.length !== 1 ? 'ies' : 'y'}
+            {hasActiveFilters && ' (filtered)'}
           </Card.Footer>
         </Card>
       )}
-
-      <Alert variant="info" className="mt-4">
-        <strong>About Audit Logs:</strong> This page displays a record of all significant 
-        user actions in the system for security monitoring and compliance purposes. 
-        Logs are retained for security analysis and cannot be modified or deleted.
-      </Alert>
     </Container>
   );
 }

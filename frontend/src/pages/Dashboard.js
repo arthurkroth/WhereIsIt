@@ -185,7 +185,7 @@ function Dashboard() {
       )}
 
       {/* Premium unlimited storage badge */}
-      {storageInfo?.unlimited && (
+      {storageInfo?.unlimited && isPremium && (
         <Card className="mb-4 border-warning">
           <Card.Body className="d-flex justify-content-between align-items-center py-2">
             <div className="d-flex align-items-center gap-2">

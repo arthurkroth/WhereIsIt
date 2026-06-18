@@ -1,5 +1,6 @@
 /**
- * Authentication routes for registration, login, MFA, email verification, and profile management.
+ * Authentication routes for registration, login, MFA, email verification,
+ * profile management, and support tickets.
  * Author: Arthur Kroth - x22166971
  * WhereIsIt Project
  */
@@ -23,7 +24,10 @@ const {
   getProfile,
   updateProfile,
   changeEmail,
-  changePassword
+  changePassword,
+  createSupportTicket,
+  getUserTickets,
+  replyToTicket
 } = require("../controllers/authController");
 
 const authRoutes = Router();
@@ -32,23 +36,12 @@ const authRoutes = Router();
 // PUBLIC ROUTES
 // ============================================================================
 
-// POST /auth/register — Register new user account
-authRoutes.post("/register", asyncHandler(register));
-
-// POST /auth/login — Login with email and password
-authRoutes.post("/login", asyncHandler(login));
-
-// GET /auth/captcha — Generate a math captcha challenge
-authRoutes.get("/captcha", asyncHandler(getCaptcha));
-
-// GET /auth/verify-email?token=... — Verify email address from link
-authRoutes.get("/verify-email", asyncHandler(verifyEmail));
-
-// POST /auth/resend-verification — Resend verification email
+authRoutes.post("/register",            asyncHandler(register));
+authRoutes.post("/login",               asyncHandler(login));
+authRoutes.get("/captcha",              asyncHandler(getCaptcha));
+authRoutes.get("/verify-email",         asyncHandler(verifyEmail));
 authRoutes.post("/resend-verification", asyncHandler(resendVerification));
-
-// POST /auth/mfa/login-verify — Verify MFA token or recovery code during login
-authRoutes.post("/mfa/login-verify", asyncHandler(verifyMfaLogin));
+authRoutes.post("/mfa/login-verify",    asyncHandler(verifyMfaLogin));
 
 // POST /auth/forgot-password — Request password reset
 authRoutes.post("/forgot-password", async (req, res) => {
@@ -61,7 +54,6 @@ authRoutes.post("/forgot-password", async (req, res) => {
       [email]
     );
 
-    // Always return success to prevent email enumeration
     if (rows.length === 0) {
       return res.json({
         success: true,
@@ -84,21 +76,16 @@ authRoutes.post("/forgot-password", async (req, res) => {
         "INSERT INTO audit_logs (user_id, action, details) VALUES (?, ?, ?)",
         [user.id, "FORGOT_PASSWORD_REQUESTED", "Password reset requested"]
       );
-    } catch (err) {
-      console.log('Audit log skipped:', err.message);
-    }
+    } catch (err) { console.log('Audit log skipped:', err.message); }
 
-    // Development mode — log the token to console and return in response
     const isDevelopment = process.env.NODE_ENV !== 'production';
     if (isDevelopment) {
-      // Also send via email so the Ethereal preview URL is logged
       try {
         const emailService = require("../services/emailService");
         await emailService.sendPasswordResetEmail(user.email, user.first_name, resetToken);
       } catch (err) {
         console.error('Failed to send password reset email:', err.message);
       }
-
       console.log('Password reset token for', email, ':', resetToken);
       return res.json({
         success: true,
@@ -123,7 +110,6 @@ authRoutes.post("/forgot-password", async (req, res) => {
 authRoutes.post("/reset-password", async (req, res) => {
   try {
     const { token, newPassword } = req.body;
-
     if (!token) return res.status(400).json({ error: "Reset token is required" });
     if (!newPassword) return res.status(400).json({ error: "New password is required" });
     if (newPassword.length < 12) {
@@ -155,9 +141,7 @@ authRoutes.post("/reset-password", async (req, res) => {
         "INSERT INTO audit_logs (user_id, action, details) VALUES (?, ?, ?)",
         [rows[0].id, "PASSWORD_RESET_SUCCESS", "Password reset successfully"]
       );
-    } catch (err) {
-      console.log('Audit log skipped:', err.message);
-    }
+    } catch (err) { console.log('Audit log skipped:', err.message); }
 
     return res.json({
       success: true,
@@ -174,25 +158,17 @@ authRoutes.post("/reset-password", async (req, res) => {
 // PROTECTED ROUTES
 // ============================================================================
 
-// POST /auth/mfa/begin — Start MFA setup
-authRoutes.post("/mfa/begin", requireAuth, asyncHandler(beginMfaSetup));
+authRoutes.post("/mfa/begin",         requireAuth, asyncHandler(beginMfaSetup));
+authRoutes.post("/mfa/confirm",       requireAuth, asyncHandler(confirmMfaSetup));
+authRoutes.delete("/mfa",             requireAuth, asyncHandler(disableMfa));
+authRoutes.get("/profile",            requireAuth, asyncHandler(getProfile));
+authRoutes.put("/profile",            requireAuth, asyncHandler(updateProfile));
+authRoutes.put("/change-email",       requireAuth, asyncHandler(changeEmail));
+authRoutes.put("/change-password",    requireAuth, asyncHandler(changePassword));
 
-// POST /auth/mfa/confirm — Confirm MFA setup, returns recovery codes
-authRoutes.post("/mfa/confirm", requireAuth, asyncHandler(confirmMfaSetup));
-
-// DELETE /auth/mfa — Disable MFA and delete all recovery codes
-authRoutes.delete("/mfa", requireAuth, asyncHandler(disableMfa));
-
-// GET /auth/profile — Get current user's profile
-authRoutes.get("/profile", requireAuth, asyncHandler(getProfile));
-
-// PUT /auth/profile — Update name fields
-authRoutes.put("/profile", requireAuth, asyncHandler(updateProfile));
-
-// PUT /auth/change-email — Change email (requires password + triggers re-verification)
-authRoutes.put("/change-email", requireAuth, asyncHandler(changeEmail));
-
-// PUT /auth/change-password — Change password (requires current password)
-authRoutes.put("/change-password", requireAuth, asyncHandler(changePassword));
+// Support ticket routes
+authRoutes.post("/support",           requireAuth, asyncHandler(createSupportTicket));
+authRoutes.get("/support",            requireAuth, asyncHandler(getUserTickets));
+authRoutes.put("/support/:id",        requireAuth, asyncHandler(replyToTicket));
 
 module.exports = { authRoutes };

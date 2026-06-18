@@ -12,3 +12,6 @@ backend/uploads/
 # OS generated files
 .DS_Store
 Thumbs.db
+
+# Reports
+backend/reports/

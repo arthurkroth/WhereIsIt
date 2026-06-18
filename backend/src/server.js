@@ -8,10 +8,11 @@ const { createApp } = require("./app");
 const { env } = require("./config/env");
 const { dbHealthCheck } = require("./config/db");
 const { startWarrantyAlertService } = require("./services/warrantyAlertService");
+const { startReportScheduler } = require("./services/reportService");
 
 /**
  * Starts the server after verifying DB connectivity.
- * Also starts the warranty alert background service for Premium users.
+ * Also starts the warranty alert and report scheduler background services.
  */
 async function start() {
   await dbHealthCheck();
@@ -20,10 +21,12 @@ async function start() {
   app.listen(env.port, () => {
     console.log(`WhereIsIt backend running on http://localhost:${env.port}`);
 
-    // Start the warranty alert cron job for Premium users.
-    // Runs daily at midnight UTC — checks for expiring warranties
-    // and sends email notifications based on user preferences.
+    // Start warranty alert cron — runs daily at midnight UTC
     startWarrantyAlertService();
+
+    // Start report scheduler cron — runs daily at 01:00 UTC
+    // Checks the report_schedule table and generates a report when due
+    startReportScheduler();
   });
 }
 
