@@ -1,5 +1,81 @@
 # Changelog
 
+## [0.6.0] - 18/06/2026 - Completed Admin use case.
+ 
+### Added
+ 
+#### Admin Dashboard
+- `AdminDashboard.js` - new admin landing page with four stat cards (total users with Free/Premium breakdown, total receipts, open support tickets, suspended accounts) and a Recent Admin Actions table pulled from audit_logs
+- Four navigation cards linking to User Management, Support Tickets, Audit Logs, and Reports
+- Admins are redirected to `/admin/dashboard` on login instead of the user receipt dashboard - `HomeRedirect` and `DashboardRoute` components added to `App.js` for role-aware routing
+
+#### User Management
+- `AdminUsers.js` - user search and list page with filters for role (Free/Premium/Admin) and status (active/suspended). Search by email, name, or user ID
+- `AdminUserDetail.js` - full user detail page showing account overview, receipt count, MFA status, remaining recovery codes, recent login history (last 10 from audit_logs), and account action history
+- Five account action modals, all requiring a written reason and creating detailed audit log entries:
+  - **Change Tier** - switches user between FREE and PREMIUM (min 10 char reason). Sends notification email to user
+  - **Suspend Account** - marks account as suspended, blocks login (min 20 char reason). Sends suspension email
+  - **Reactivate Account** - lifts a suspension (min 10 char reason). Sends reactivation email
+  - **Send Password Reset** - generates a 24-hour reset token and emails it to the user (min 10 char reason)
+  - **Reset MFA** - highest-security action: clears MFA secret and invalidates all recovery codes. Requires min 50 char justification and admin must re-enter their own password. Sends urgent security notification to user
+
+#### Support Ticket Management
+- `AdminSupportTickets.js` - ticket list with status and priority filters, sorted open/high-priority first. Includes a "Replied" badge in the table when the user has sent a reply
+- Ticket detail modal shows the full conversation thread: user's original message → previous admin response → user reply (highlighted in amber) → response form
+- Admin can respond to tickets and change status (Open, In Progress, Resolved). Response emails sent to user via Nodemailer/Ethereal
+- "Create Test Ticket" button allows admins to create tickets on behalf of any user ID for demo and testing purposes
+
+#### User-Facing Support Tickets
+- **Contact Support** tab added to Profile page (5th tab, available to all authenticated users)
+- Submit new ticket form with subject, priority selector (Low/Medium/High), and message body
+- Ticket history panel shows all submitted tickets with status/priority badges and admin responses
+- **User reply flow** - when an admin has responded and the ticket is not yet resolved, a reply textarea appears in the ticket history. The user can send a follow-up reply which re-opens the ticket to In Progress status so the admin knows a reply is waiting
+- New backend endpoints: `POST /auth/support`, `GET /auth/support`, `PUT /auth/support/:id`
+
+#### Enhanced Audit Logs
+- `AdminAuditLogs.js` - full replacement of the previous basic version
+- Filters: free-text search, event type dropdown (populated from unique actions in the dataset), user ID, date range (from/to), entry limit (50/100/250/500)
+- Severity colour-coding: red rows for critical events (suspensions, failures, MFA resets), amber for security events (admin actions, logins, MFA), grey for standard info events
+- User ID cells are clickable links that navigate directly to that user's detail page
+- IP address column included for all events
+
+#### Scheduled Reports
+- `reportService.js` - new service that generates `.log` report files saved to `backend/reports/`
+- Report content includes five sections: System Summary (user counts by role, receipts, tickets), New Users in Period, Security Events (unauthorized access attempts, failed MFA, suspensions, MFA resets), Admin Actions (all ADMIN\_ prefixed events), Full Audit Log (up to 1000 entries with timestamps and IPs)
+- On-demand generation via admin panel (generates immediately using the configured frequency period)
+- Scheduled generation via `node-cron` running at 01:00 UTC daily - checks `report_schedule` table and generates when due based on frequency setting
+- Three frequency modes: Daily (every run), Weekly (every 7 days), Monthly (every 30 days)
+- `AdminReports.js` - new admin page with schedule enable/disable toggle, frequency selector, last run timestamp, "Generate Report Now" button, and a list of saved `.log` files with size and download buttons
+- Download triggered client-side via blob URL - files are named `WhereIsIt_Report_YYYY-MM-DD_HH-MM-SS.log`
+- Reports card added to Admin Dashboard navigation
+- Reports link added to Admin Panel dropdown in Navbar
+- `server.js` updated to start the report scheduler on startup alongside the warranty alert service
+- `report_schedule` table created to persist schedule configuration
+
+#### Unauthorized Access Logging
+- `authMiddleware.js` `requireRole` function updated to be async and log an `UNAUTHORIZED_ACCESS_ATTEMPT` audit entry (with user ID, attempted path, required role, and IP address) before returning 403. This satisfies the admin spec requirement for security event logging - the attempt is logged server-side and cannot be bypassed
+
+### Changed
+- `App.js` - Navbar is now conditionally rendered only when the user is authenticated (not shown on login, register, or public pages). Content area has `paddingTop: 1.5rem` to clear the sticky navbar
+- `App.js` - `DashboardRoute` component redirects ADMIN-role users to `/admin/dashboard` if they land on `/dashboard` (e.g. from a post-login redirect)
+- `Navbar.js` - admin users see an "Admin Panel" dropdown with links to Dashboard, User Management, Support Tickets, Audit Logs, and Reports (separated by a divider). The logout function now correctly calls `logoutUser()` from `AuthContext` (was previously referencing the non-existent `logout`)
+- `adminController.js` `listAuditLogs` - `LIMIT` value is now inlined as a sanitised integer rather than a `?` placeholder, fixing MySQL driver compatibility issues with parameterised LIMIT values
+- `AdminSupportTickets.js` - admin response text field now starts empty when opening a ticket (was pre-populated with the previous response). Previous admin response is still visible as a read-only card above the input
+- `Dashboard.js` - "Premium - Unlimited Storage" badge is now shown only for PREMIUM role users; ADMIN users no longer incorrectly see the Premium storage banner
+
+### Fixed
+- Suspended account login blocking - `authController.js` `login()` now checks `user.status === 'suspended'` after password validation and before MFA check, returning 403 with `accountSuspended: true` if the account is suspended
+- `Navbar.js` runtime error "logout is not a function" - `AuthContext` exports `logoutUser`, not `logout`. Previous Navbar used the wrong name, causing a crash on logout and silently corrupting the render tree when navigating to admin user detail pages
+- `AdminAuditLogs.js` 500 error - `ip_address` column did not exist in `audit_logs` table and MySQL rejected `?` as a `LIMIT` placeholder. Fixed by running `ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS ip_address VARCHAR(45) DEFAULT NULL` and inlining the sanitised limit
+
+### Database Migrations
+- `ALTER TABLE users ADD COLUMN status ENUM('active','suspended') NOT NULL DEFAULT 'active'` - supports account suspension
+- `CREATE TABLE support_tickets (...)` - full ticket schema with status, priority, admin response, responded_by, created_at, updated_at
+- `ALTER TABLE audit_logs ADD COLUMN IF NOT EXISTS ip_address VARCHAR(45) DEFAULT NULL` - enables IP address logging on all audit events
+- `ALTER TABLE support_tickets ADD COLUMN user_reply TEXT DEFAULT NULL, ADD COLUMN user_replied_at TIMESTAMP DEFAULT NULL` - supports user replies to admin responses
+- `CREATE TABLE report_schedule (...)` with seed row `INSERT INTO report_schedule (id, enabled, frequency) VALUES (1, FALSE, 'weekly')` - persists report schedule configuration
+
+
 ## [0.5.0] - 01/06/2026 - Completed Premium User use case + CI/CD security pipeline.
 
 ### Added

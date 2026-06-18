@@ -2,105 +2,106 @@
  * File: Navbar.js
  * Author: Arthur Kroth - x22166971
  * WhereIsIt Project
+ *
+ * KEY CHANGE: Added Reports link to admin dropdown.
  */
 
 import React from 'react';
-import { Navbar, Nav, Container, Button } from 'react-bootstrap';
-import { Link, useNavigate } from 'react-router-dom';
+import { Link, useNavigate, useLocation } from 'react-router-dom';
+import {
+  Navbar as BsNavbar, Nav, Container,
+  Button, Badge, NavDropdown
+} from 'react-bootstrap';
 import { useAuth } from '../context/AuthContext';
 
-/**
- * NavigationBar component shown on every page.
- * Displays navigation links and the current user's name and role.
- * Shows different links depending on authentication and role status.
- *
- * CHANGES:
- * - "MFA Setup" link replaced with "Profile" which includes MFA management
- *   alongside account details and password change.
- */
-const NavigationBar = () => {
-  const { user, isAuthenticated, logoutUser, hasRole } = useAuth();
+function Navbar() {
   const navigate = useNavigate();
+  const location = useLocation();
+  const { user, logoutUser } = useAuth();
 
-  /**
-   * Handles user logout.
-   * Clears authentication state and redirects to login page.
-   */
   const handleLogout = () => {
     logoutUser();
     navigate('/login');
   };
 
-  /**
-   * Returns a display name for the current user.
-   * Shows "First Last" if both names are available, otherwise falls back gracefully.
-   * @returns {string} Display name
-   */
-  const getDisplayName = () => {
-    const first = user?.firstName || '';
-    const last = user?.lastName || '';
-    if (first && last) return `${first} ${last}`;
-    if (first) return first;
-    return 'User';
-  };
+  const isActive = (path) => location.pathname.startsWith(path);
+
+  const isPremium = user?.role === 'PREMIUM';
+  const isAdmin   = user?.role === 'ADMIN';
 
   return (
-    <Navbar bg="dark" variant="dark" expand="lg" className="mb-4">
+    <BsNavbar bg="dark" variant="dark" expand="lg" sticky="top">
       <Container>
-        <Navbar.Brand as={Link} to="/">
+        <BsNavbar.Brand as={Link} to="/dashboard" className="fw-bold">
           WhereIsIt?
-        </Navbar.Brand>
-        <Navbar.Toggle aria-controls="basic-navbar-nav" />
-        <Navbar.Collapse id="basic-navbar-nav">
-          <Nav className="me-auto">
-            {isAuthenticated() && (
-              <>
-                <Nav.Link as={Link} to="/dashboard">
-                  Dashboard
-                </Nav.Link>
-                <Nav.Link as={Link} to="/receipts">
-                  My Receipts
-                </Nav.Link>
-                <Nav.Link as={Link} to="/receipt/upload">
-                  Upload Receipt
-                </Nav.Link>
-                {/* Profile replaces the old standalone MFA Setup link */}
-                <Nav.Link as={Link} to="/profile">
-                  Profile
-                </Nav.Link>
-                {hasRole('ADMIN') && (
-                  <Nav.Link as={Link} to="/admin/audit-logs">
-                    Audit Logs
-                  </Nav.Link>
-                )}
-              </>
-            )}
-          </Nav>
-          <Nav>
-            {isAuthenticated() ? (
-              <>
-                <Navbar.Text className="me-3">
-                  {getDisplayName()} | {user?.role}
-                </Navbar.Text>
-                <Button variant="outline-light" size="sm" onClick={handleLogout}>
-                  Logout
-                </Button>
-              </>
-            ) : (
-              <>
-                <Nav.Link as={Link} to="/login">
-                  Login
-                </Nav.Link>
-                <Nav.Link as={Link} to="/register">
-                  Register
-                </Nav.Link>
-              </>
-            )}
-          </Nav>
-        </Navbar.Collapse>
-      </Container>
-    </Navbar>
-  );
-};
+        </BsNavbar.Brand>
 
-export default NavigationBar;
+        <BsNavbar.Toggle aria-controls="main-navbar" />
+        <BsNavbar.Collapse id="main-navbar">
+
+          <Nav className="me-auto">
+            <Nav.Link as={Link} to="/dashboard"
+              className={isActive('/dashboard') ? 'active' : ''}>
+              Dashboard
+            </Nav.Link>
+            <Nav.Link as={Link} to="/receipts"
+              className={isActive('/receipts') ? 'active' : ''}>
+              My Receipts
+            </Nav.Link>
+            <Nav.Link as={Link} to="/receipt/upload"
+              className={isActive('/receipt/upload') ? 'active' : ''}>
+              Upload Receipt
+            </Nav.Link>
+            <Nav.Link as={Link} to="/profile"
+              className={isActive('/profile') ? 'active' : ''}>
+              Profile
+            </Nav.Link>
+
+            {/* Admin dropdown — visible to ADMIN role only */}
+            {isAdmin && (
+              <NavDropdown
+                title="Admin Panel"
+                id="admin-dropdown"
+                className={isActive('/admin') ? 'active' : ''}
+              >
+                <NavDropdown.Item as={Link} to="/admin/dashboard">
+                  Dashboard
+                </NavDropdown.Item>
+                <NavDropdown.Item as={Link} to="/admin/users">
+                  User Management
+                </NavDropdown.Item>
+                <NavDropdown.Item as={Link} to="/admin/tickets">
+                  Support Tickets
+                </NavDropdown.Item>
+                <NavDropdown.Item as={Link} to="/admin/audit-logs">
+                  Audit Logs
+                </NavDropdown.Item>
+                <NavDropdown.Divider />
+                <NavDropdown.Item as={Link} to="/admin/reports">
+                  Reports
+                </NavDropdown.Item>
+              </NavDropdown>
+            )}
+          </Nav>
+
+          <Nav className="align-items-center gap-2">
+            {isPremium && (
+              <Nav.Link as={Link} to="/profile" className="text-warning fw-semibold pe-0">
+                Premium Account | PREMIUM
+              </Nav.Link>
+            )}
+            {isAdmin && (
+              <Badge bg="danger" className="me-1">ADMIN</Badge>
+            )}
+            <Button variant="outline-light" size="sm" onClick={handleLogout}>
+              Logout
+            </Button>
+          </Nav>
+
+        </BsNavbar.Collapse>
+      </Container>
+    </BsNavbar>
+  );
+}
+
+export default Navbar;

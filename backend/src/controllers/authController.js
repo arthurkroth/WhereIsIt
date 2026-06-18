@@ -2,6 +2,9 @@
  * Authentication controller for registration, login, MFA, and profile management.
  * Author: Arthur Kroth - x22166971
  * WhereIsIt Project
+ *
+ * ADDED: replyToTicket — allows users to reply to their own support tickets
+ * when an admin has responded and the ticket is not yet resolved.
  */
 
 const { AuthService } = require("../services/authService");
@@ -79,10 +82,6 @@ async function createRecoveryCodes(userId) {
 // EMAIL VERIFICATION — helpers
 // ============================================================================
 
-/**
- * Generates a verification token, stores its SHA-256 hash with a 24-hour expiry,
- * and sends the verification email.
- */
 async function sendVerificationEmail(userId, email, firstName) {
   const plainToken = crypto.randomBytes(32).toString('hex');
   const hashedToken = crypto.createHash('sha256').update(plainToken).digest('hex');
@@ -100,10 +99,6 @@ async function sendVerificationEmail(userId, email, firstName) {
 // REGISTRATION & LOGIN
 // ============================================================================
 
-/**
- * POST /auth/register
- * Creates a new user account with FREE role and sends a verification email.
- */
 async function register(req, res) {
   const parsed = registerSchema.parse(req.body);
   const role = 'FREE';
@@ -126,101 +121,42 @@ async function register(req, res) {
   });
 }
 
-/**
- * GET /auth/verify-email?token=...
- * Verifies a user's email address using the token from the verification link.
- *
- * THREE OUTCOMES:
- * 1. Token found, not expired, not yet verified → verify and return success
- * 2. Token not found BUT email is already verified → return alreadyVerified: true
- *    (handles React StrictMode double-invocation gracefully)
- * 3. Token not found and email not verified → return expired error
- */
 async function verifyEmail(req, res) {
   const { token } = req.query;
-
-  if (!token) {
-    return res.status(400).json({ error: 'Verification token is required' });
-  }
+  if (!token) return res.status(400).json({ error: 'Verification token is required' });
 
   const hashedToken = crypto.createHash('sha256').update(token).digest('hex');
 
-  // First: look for a valid pending token
   const [rows] = await db.execute(
     `SELECT id, first_name FROM users
      WHERE email_verification_token = ?
      AND email_verification_expires > NOW()
-     AND email_verified = FALSE
-     LIMIT 1`,
+     AND email_verified = FALSE LIMIT 1`,
     [hashedToken]
   );
 
   if (rows.length > 0) {
-    // Valid token found — mark as verified and clear the token
     await db.execute(
-      `UPDATE users
-       SET email_verified = TRUE,
-           email_verification_token = NULL,
-           email_verification_expires = NULL
-       WHERE id = ?`,
+      `UPDATE users SET email_verified = TRUE,
+       email_verification_token = NULL, email_verification_expires = NULL WHERE id = ?`,
       [rows[0].id]
     );
-
-    try {
-      await audit.log(rows[0].id, "EMAIL_VERIFIED", "User verified their email address");
-    } catch (err) {
-      console.log('Audit log skipped:', err.message);
-    }
-
-    return res.json({
-      success: true,
-      alreadyVerified: false,
-      message: 'Email verified successfully. You can now log in.'
-    });
+    try { await audit.log(rows[0].id, "EMAIL_VERIFIED", "User verified their email address"); } catch {}
+    return res.json({ success: true, alreadyVerified: false, message: 'Email verified successfully. You can now log in.' });
   }
 
-  // Token not found — check if the account is already verified
-  // This handles the React StrictMode double-call: the first call verifies and
-  // clears the token; the second call finds no token but sees email_verified = TRUE
-  const [verifiedRows] = await db.execute(
-    `SELECT id FROM users WHERE email_verification_token = ? AND email_verified = TRUE LIMIT 1`,
-    [hashedToken]
-  );
-
-  // Also check by matching the recently-cleared token pattern:
-  // if email_verified is TRUE and token is NULL, the most recent user might be the one
-  // We handle this by just checking if any user has this as a token (even if verified already)
-  // A simpler approach: try finding user with verified=TRUE and no token (cleared just now)
-  // The cleanest solution is the one below — look up by hashed token regardless of verified state
   const [anyRows] = await db.execute(
-    `SELECT id, email_verified FROM users
-     WHERE email_verification_token = ?
-     LIMIT 1`,
+    `SELECT id, email_verified FROM users WHERE email_verification_token = ? LIMIT 1`,
     [hashedToken]
   );
 
   if (anyRows.length > 0 && anyRows[0].email_verified) {
-    // Token still in DB but already verified (shouldn't normally happen, but just in case)
-    return res.json({
-      success: true,
-      alreadyVerified: true,
-      message: 'Your email address is already verified. You can log in.'
-    });
+    return res.json({ success: true, alreadyVerified: true, message: 'Your email address is already verified. You can log in.' });
   }
 
-  // No record at all — token is genuinely expired or invalid
-  // Last check: was this email recently verified? (token was cleared after successful verify)
-  // We can't know for sure without the original email, so return the expired error
-  return res.status(400).json({
-    error: 'Invalid or expired verification link. Please request a new one.',
-    expired: true
-  });
+  return res.status(400).json({ error: 'Invalid or expired verification link. Please request a new one.', expired: true });
 }
 
-/**
- * POST /auth/resend-verification
- * Resends the verification email. Always returns success to prevent enumeration.
- */
 async function resendVerification(req, res) {
   const { email } = req.body;
   if (!email) return res.status(400).json({ error: 'Email is required' });
@@ -230,7 +166,6 @@ async function resendVerification(req, res) {
       'SELECT id, first_name, email FROM users WHERE email = ? AND email_verified = FALSE LIMIT 1',
       [email.trim().toLowerCase()]
     );
-
     if (rows.length > 0) {
       const user = rows[0];
       await sendVerificationEmail(user.id, user.email, user.first_name);
@@ -240,16 +175,9 @@ async function resendVerification(req, res) {
     console.error('Resend verification error:', err.message);
   }
 
-  return res.json({
-    success: true,
-    message: 'If an unverified account with that email exists, a new verification link has been sent.'
-  });
+  return res.json({ success: true, message: 'If an unverified account with that email exists, a new verification link has been sent.' });
 }
 
-/**
- * POST /auth/login
- * Validates credentials. Blocks login if email is not verified.
- */
 async function login(req, res) {
   const parsed = loginSchema.parse(req.body);
 
@@ -276,24 +204,24 @@ async function login(req, res) {
     const current = failedLoginAttempts.get(parsed.email) || { count: 0 };
     const newCount = current.count + 1;
     failedLoginAttempts.set(parsed.email, { count: newCount, lastAttempt: Date.now() });
-    return res.status(401).json({
-      error: 'Invalid email or password',
-      requiresCaptcha: newCount >= CAPTCHA_THRESHOLD
+    return res.status(401).json({ error: 'Invalid email or password', requiresCaptcha: newCount >= CAPTCHA_THRESHOLD });
+  }
+
+  // Block login if the account has been suspended
+  if (user.status === 'suspended') {
+    return res.status(403).json({
+      error: 'Your account has been suspended. Please contact support.',
+      accountSuspended: true
     });
   }
 
   failedLoginAttempts.delete(parsed.email);
 
-  // Block login if email is not verified
-  const [verifyRows] = await db.execute(
-    'SELECT email_verified FROM users WHERE id = ?', [user.id]
-  );
-
+  const [verifyRows] = await db.execute('SELECT email_verified FROM users WHERE id = ?', [user.id]);
   if (verifyRows.length > 0 && !verifyRows[0].email_verified) {
     return res.status(403).json({
       error: 'Please verify your email address before logging in.',
-      emailNotVerified: true,
-      email: parsed.email
+      emailNotVerified: true, email: parsed.email
     });
   }
 
@@ -394,10 +322,8 @@ async function getProfile(req, res) {
   return res.json({
     success: true,
     profile: {
-      id: user.id,
-      email: user.email,
-      firstName: user.first_name,
-      lastName: user.last_name,
+      id: user.id, email: user.email,
+      firstName: user.first_name, lastName: user.last_name,
       role: user.role,
       mfaEnabled: user.mfa_enabled === 1 || user.mfa_enabled === true,
       emailVerified: user.email_verified === 1 || user.email_verified === true,
@@ -441,11 +367,8 @@ async function changeEmail(req, res) {
 
   await db.execute("UPDATE users SET email = ?, email_verified = FALSE WHERE id = ?", [cleanEmail, userId]);
 
-  try {
-    await sendVerificationEmail(userId, cleanEmail, userRows[0].first_name);
-  } catch (err) {
-    console.error('Failed to send verification email after email change:', err.message);
-  }
+  try { await sendVerificationEmail(userId, cleanEmail, userRows[0].first_name); }
+  catch (err) { console.error('Failed to send verification email after email change:', err.message); }
 
   try { await audit.log(userId, "EMAIL_CHANGED", `Email changed to ${cleanEmail}`); } catch {}
   return res.json({ success: true, message: "Email updated. Please check your new inbox to verify your address." });
@@ -474,9 +397,115 @@ async function changePassword(req, res) {
   return res.json({ success: true, message: "Password changed successfully" });
 }
 
+// ============================================================================
+// SUPPORT TICKETS (user-facing)
+// ============================================================================
+
+/**
+ * POST /auth/support
+ * Creates a new support ticket for the authenticated user.
+ */
+async function createSupportTicket(req, res) {
+  const userId = req.user.userId;
+  const { subject, message, priority = 'medium' } = req.body;
+
+  if (!subject?.trim() || subject.trim().length < 5) {
+    return res.status(400).json({ error: 'Subject must be at least 5 characters' });
+  }
+  if (!message?.trim() || message.trim().length < 10) {
+    return res.status(400).json({ error: 'Message must be at least 10 characters' });
+  }
+
+  const validPriorities = ['low', 'medium', 'high'];
+  const cleanPriority = validPriorities.includes(priority) ? priority : 'medium';
+
+  const [result] = await db.execute(
+    'INSERT INTO support_tickets (user_id, subject, message, priority) VALUES (?, ?, ?, ?)',
+    [userId, subject.trim().substring(0, 200), message.trim(), cleanPriority]
+  );
+
+  try { await audit.log(userId, 'SUPPORT_TICKET_CREATED', `User submitted ticket #${result.insertId}: "${subject.trim()}"`); } catch {}
+
+  return res.status(201).json({
+    success: true,
+    ticketId: result.insertId,
+    message: 'Your support request has been submitted. We will respond within 24 hours.'
+  });
+}
+
+/**
+ * GET /auth/support
+ * Returns all support tickets submitted by the authenticated user,
+ * including admin responses and the user's own replies.
+ */
+async function getUserTickets(req, res) {
+  const userId = req.user.userId;
+
+  const [tickets] = await db.execute(
+    `SELECT id, subject, status, priority, message,
+            admin_response, user_reply, user_replied_at,
+            created_at, updated_at
+     FROM support_tickets
+     WHERE user_id = ?
+     ORDER BY created_at DESC`,
+    [userId]
+  );
+
+  return res.json({ success: true, tickets });
+}
+
+/**
+ * PUT /auth/support/:id
+ * Allows the authenticated user to reply to their own support ticket.
+ * Only allowed when:
+ * - The ticket belongs to this user
+ * - The ticket is not resolved
+ * - The admin has already responded (requires context before replying)
+ *
+ * Saves the reply to user_reply, sets user_replied_at, and re-opens
+ * the ticket to 'in_progress' so the admin knows a reply is waiting.
+ */
+async function replyToTicket(req, res) {
+  const userId = req.user.userId;
+  const { id } = req.params;
+  const { reply } = req.body;
+
+  if (!reply?.trim() || reply.trim().length < 5) {
+    return res.status(400).json({ error: 'Reply must be at least 5 characters' });
+  }
+
+  // Verify the ticket belongs to this user
+  const [rows] = await db.execute(
+    'SELECT id, status FROM support_tickets WHERE id = ? AND user_id = ?',
+    [id, userId]
+  );
+
+  if (rows.length === 0) {
+    return res.status(404).json({ error: 'Ticket not found' });
+  }
+
+  if (rows[0].status === 'resolved') {
+    return res.status(400).json({
+      error: 'Cannot reply to a resolved ticket. Please open a new ticket if you need further assistance.'
+    });
+  }
+
+  await db.execute(
+    `UPDATE support_tickets
+     SET user_reply = ?, user_replied_at = NOW(), status = 'in_progress'
+     WHERE id = ? AND user_id = ?`,
+    [reply.trim(), id, userId]
+  );
+
+  try { await audit.log(userId, 'SUPPORT_TICKET_REPLIED', `User replied to ticket #${id}`); } catch {}
+
+  return res.json({ success: true, message: 'Your reply has been submitted.' });
+}
+
 module.exports = {
   register, login, getCaptcha,
   verifyEmail, resendVerification,
   beginMfaSetup, confirmMfaSetup, verifyMfaLogin, disableMfa,
-  getProfile, updateProfile, changeEmail, changePassword
+  getProfile, updateProfile, changeEmail, changePassword,
+  createSupportTicket, getUserTickets, replyToTicket
 };

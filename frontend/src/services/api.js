@@ -1,6 +1,5 @@
 /**
- * API Service using Axios for making HTTP requests to the backend.
- * Handles authentication tokens and provides methods for all API endpoints.
+ * File: api.js
  * Author: Arthur Kroth - x22166971
  * WhereIsIt Project
  */
@@ -70,6 +69,18 @@ export const changePassword = (currentPassword, newPassword, confirmPassword) =>
   api.put('/auth/change-password', { currentPassword, newPassword, confirmPassword });
 
 // ============================================================================
+// SUPPORT TICKETS (user-facing)
+// ============================================================================
+
+export const createSupportTicket = (subject, message, priority = 'medium') =>
+  api.post('/auth/support', { subject, message, priority });
+
+export const getUserTickets = () => api.get('/auth/support');
+
+export const replyToSupportTicket = (ticketId, reply) =>
+  api.put(`/auth/support/${ticketId}`, { reply });
+
+// ============================================================================
 // RECEIPTS
 // ============================================================================
 
@@ -82,6 +93,8 @@ export const uploadReceipt = (file) => {
 export const createManualReceipt = (receiptData) => api.post('/receipts/manual', receiptData);
 export const listReceipts = () => api.get('/receipts');
 export const getReceiptById = (id) => api.get(`/receipts/${id}`);
+export const updateReceipt = (id, data) => api.put(`/receipts/${id}`, data);
+export const deleteReceipt = (id) => api.delete(`/receipts/${id}`);
 export const getReceiptFileUrl = (id) => {
   const token = localStorage.getItem('token');
   return `http://localhost:3001/receipts/${id}/file?token=${token}`;
@@ -91,39 +104,86 @@ export const getReceiptFileUrl = (id) => {
 // PREMIUM
 // ============================================================================
 
-/**
- * Fetches the Premium user's warranty alert preferences.
- * @returns {Promise} Response with settings object
- */
 export const getPremiumSettings = () => api.get('/premium/settings');
-
-/**
- * Updates the Premium user's warranty alert preferences.
- * @param {boolean} alertsEnabled
- * @param {number} alertTimeframeDays - 7, 14, 30, 60, or 90
- * @param {string} alertFrequency - 'daily', 'weekly', or 'immediate'
- */
 export const updatePremiumSettings = (alertsEnabled, alertTimeframeDays, alertFrequency) =>
   api.put('/premium/settings', { alertsEnabled, alertTimeframeDays, alertFrequency });
-
-/**
- * Triggers a CSV export download of all receipts.
- * Returns binary CSV data — must be handled with a blob download in the frontend.
- */
 export const exportReceiptsCsv = () =>
   api.get('/premium/export/csv', { responseType: 'blob' });
-
-/**
- * Triggers a manual test warranty alert email.
- * Useful for testing the alert system during development.
- */
 export const sendTestAlert = () => api.post('/premium/alert/test');
 
 // ============================================================================
-// ADMIN
+// ADMIN — Dashboard
 // ============================================================================
 
-export const getAuditLogs = () => api.get('/admin/audit-logs');
+export const getAdminStats = () => api.get('/admin/stats');
+
+// ============================================================================
+// ADMIN — Users
+// ============================================================================
+
+export const searchAdminUsers = (q = '', role = 'all', status = 'all') =>
+  api.get(`/admin/users?q=${encodeURIComponent(q)}&role=${role}&status=${status}`);
+export const getAdminUser = (id) => api.get(`/admin/users/${id}`);
+export const adminChangeTier = (id, newTier, reason) =>
+  api.put(`/admin/users/${id}/tier`, { newTier, reason });
+export const adminSuspendAccount = (id, reason) =>
+  api.put(`/admin/users/${id}/suspend`, { reason });
+export const adminReactivateAccount = (id, reason) =>
+  api.put(`/admin/users/${id}/reactivate`, { reason });
+export const adminResetPassword = (id, reason) =>
+  api.post(`/admin/users/${id}/reset-password`, { reason });
+export const adminResetMfa = (id, justification, adminPassword) =>
+  api.delete(`/admin/users/${id}/mfa`, { data: { justification, adminPassword } });
+
+// ============================================================================
+// ADMIN — Support Tickets
+// ============================================================================
+
+export const getAdminTickets = (status = 'all', priority = 'all') =>
+  api.get(`/admin/tickets?status=${status}&priority=${priority}`);
+export const getAdminTicket = (id) => api.get(`/admin/tickets/${id}`);
+export const updateAdminTicket = (id, response, status) =>
+  api.put(`/admin/tickets/${id}`, { response, status });
+export const createAdminTicket = (userId, subject, message, priority = 'medium') =>
+  api.post('/admin/tickets', { userId, subject, message, priority });
+
+// ============================================================================
+// ADMIN — Audit Logs
+// ============================================================================
+
+export const getAuditLogs = (filters = {}) => {
+  const params = new URLSearchParams();
+  Object.entries(filters).forEach(([k, v]) => { if (v) params.append(k, v); });
+  return api.get(`/admin/audit-logs?${params.toString()}`);
+};
+
+// ============================================================================
+// ADMIN — Reports
+// ============================================================================
+
+/** Returns the current report schedule settings. */
+export const getReportSchedule = () => api.get('/admin/reports/schedule');
+
+/**
+ * Updates the report schedule settings.
+ * @param {boolean} enabled
+ * @param {string} frequency - 'daily' | 'weekly' | 'monthly'
+ */
+export const updateReportSchedule = (enabled, frequency) =>
+  api.put('/admin/reports/schedule', { enabled, frequency });
+
+/** Generates a report on demand immediately. */
+export const generateReport = () => api.post('/admin/reports/generate');
+
+/** Lists all saved .log report files. */
+export const listReports = () => api.get('/admin/reports');
+
+/**
+ * Downloads a specific .log report file as a blob.
+ * @param {string} filename - Exact filename from listReports response
+ */
+export const downloadReport = (filename) =>
+  api.get(`/admin/reports/download/${encodeURIComponent(filename)}`, { responseType: 'blob' });
 
 // ============================================================================
 // HEALTH
