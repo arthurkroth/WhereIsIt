@@ -24,6 +24,11 @@ const env = {
   nodeEnv: process.env.NODE_ENV || "development",
   port: Number(process.env.PORT || "3001"),
 
+  // Public URL the frontend is served from (e.g. https://whereisit.ie, or
+  // http://localhost:3000 in local dev). Used to build links in emails
+  // (verification, password reset) and to restrict CORS to this origin.
+  appBaseUrl: requireEnv("APP_BASE_URL"),
+
   db: {
     host: requireEnv("DB_HOST"),
     port: Number(process.env.DB_PORT || "3306"),

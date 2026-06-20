@@ -7,6 +7,8 @@
  * - Added aiProviderError state and notification banner
  * - When OpenAI falls back to Tesseract, a warning alert is shown in the
  *   review step telling the user that AI OCR was unavailable
+ * - File preview fetch now uses getReceiptFileUrl() from api.js instead of a
+ *   hardcoded localhost URL, so it works correctly in both local dev and production
  */
 
 import React, { useState, useRef, useEffect } from 'react';
@@ -15,7 +17,7 @@ import {
   Container, Card, Form, Button, Alert,
   Spinner, ProgressBar, Row, Col
 } from 'react-bootstrap';
-import { uploadReceipt } from '../services/api';
+import { uploadReceipt, getReceiptFileUrl } from '../services/api';
 import api from '../services/api';
 import TagSelector from '../components/TagSelector';
 
@@ -64,13 +66,15 @@ function ReceiptUpload() {
   const MAX_ZOOM = 300;
   const ZOOM_STEP = 25;
 
-  // Load receipt file preview after OCR completes
+  // Load receipt file preview after OCR completes.
+  // Uses getReceiptFileUrl (from api.js) so the URL automatically points to
+  // the right place on both localhost and production — no hardcoded host here.
   useEffect(() => {
     if (!receiptId) return;
     const fetchFile = async () => {
       try {
         const token = localStorage.getItem('token');
-        const response = await fetch(`http://localhost:3001/receipts/${receiptId}/file`,
+        const response = await fetch(getReceiptFileUrl(receiptId),
           { headers: { Authorization: `Bearer ${token}` } });
         if (!response.ok) return;
         const blob = await response.blob();

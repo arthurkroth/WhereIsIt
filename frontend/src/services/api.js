@@ -6,7 +6,19 @@
 
 import axios from 'axios';
 
-const API_BASE_URL = '/';
+// Determines the backend base URL automatically depending on where the app is running.
+// - On localhost (local development), the backend runs on a different port (3001),
+//   so requests must go directly to http://localhost:3001.
+// - On any other host (production, e.g. whereisit.ie), requests use a relative path
+//   so they go through nginx, which proxies them to the backend on the same domain.
+// This means the SAME code works locally and in production with no manual editing
+// after every deployment.
+const getApiBaseUrl = () => {
+  const isLocalhost = window.location.hostname === 'localhost' || window.location.hostname === '127.0.0.1';
+  return isLocalhost ? 'http://localhost:3001' : '';
+};
+
+const API_BASE_URL = getApiBaseUrl();
 
 const api = axios.create({
   baseURL: API_BASE_URL,
@@ -121,10 +133,13 @@ export const getReceiptById = (id) => api.get(`/receipts/${id}`);
 export const updateReceipt = (id, data) => api.put(`/receipts/${id}`, data);
 // Deletes a receipt and its attached file.
 export const deleteReceipt = (id) => api.delete(`/receipts/${id}`);
+
 // Builds the authenticated URL used to view/download a receipt's attached file.
+// Uses the same environment-aware base URL as the rest of the API client,
+// so this works correctly both on localhost and in production.
 export const getReceiptFileUrl = (id) => {
   const token = localStorage.getItem('token');
-  return `http://localhost:3001/receipts/${id}/file?token=${token}`;
+  return `${API_BASE_URL}/receipts/${id}/file?token=${token}`;
 };
 
 // ============================================================================

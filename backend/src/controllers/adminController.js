@@ -7,6 +7,7 @@
  */
 
 const { db } = require('../config/db');
+const { env } = require('../config/env');
 const bcrypt = require('bcryptjs');
 const crypto = require('crypto');
 const path = require('path');
@@ -198,7 +199,7 @@ async function adminResetPassword(req, res) {
   const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
   await db.execute('UPDATE users SET password_reset_token = ?, password_reset_expires = ? WHERE id = ?', [hashedToken, expiresAt, id]);
   try {
-    const resetUrl = `${process.env.APP_BASE_URL}/reset-password?token=${plainToken}`;
+    const resetUrl = `${env.appBaseUrl}/reset-password?token=${plainToken}`;
     await emailService.sendEmail({
       to: user.email,
       subject: 'Password reset for your WhereIsIt? account',
