@@ -13,6 +13,7 @@ const api = axios.create({
   headers: { 'Content-Type': 'application/json' },
 });
 
+// Attaches the stored JWT (if any) as a Bearer token on every outgoing request.
 api.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem('token');
@@ -22,6 +23,7 @@ api.interceptors.request.use(
   (error) => Promise.reject(error)
 );
 
+// Clears the stored token and redirects to login on any 401 outside the login flow itself.
 api.interceptors.response.use(
   (response) => response,
   (error) => {
@@ -38,9 +40,11 @@ api.interceptors.response.use(
 // AUTHENTICATION
 // ============================================================================
 
+// Creates a new FREE-tier account.
 export const register = (email, password, plan = 'FREE', firstName, lastName) =>
   api.post('/auth/register', { email, password, firstName, lastName });
 
+// Logs in with email/password, optionally including a CAPTCHA answer.
 export const login = (email, password, captchaId = null, captchaAnswer = null) => {
   const body = { email, password };
   if (captchaId) body.captchaId = captchaId;
@@ -48,23 +52,36 @@ export const login = (email, password, captchaId = null, captchaAnswer = null) =
   return api.post('/auth/login', body);
 };
 
+// Fetches a new math CAPTCHA challenge.
 export const getCaptcha = () => api.get('/auth/captcha');
+// Verifies an email address using the token from the verification email link.
 export const verifyEmail = (token) => api.get(`/auth/verify-email?token=${encodeURIComponent(token)}`);
+// Requests a fresh verification email for an unverified account.
 export const resendVerification = (email) => api.post('/auth/resend-verification', { email });
+// Verifies an MFA token/recovery code to complete login.
 export const verifyMfaLogin = (userId, token) => api.post('/auth/mfa/login-verify', { userId, token });
+// Starts MFA setup and requests the otpauth URL/QR code.
 export const beginMfaSetup = () => api.post('/auth/mfa/begin');
+// Confirms MFA setup with the first TOTP code.
 export const confirmMfaSetup = (token) => api.post('/auth/mfa/confirm', { token });
+// Disables MFA on the current account.
 export const disableMfa = () => api.delete('/auth/mfa');
+// Requests a password reset email.
 export const forgotPassword = (email) => api.post('/auth/forgot-password', { email });
+// Resets the password using a valid reset token.
 export const resetPassword = (token, newPassword) => api.post('/auth/reset-password', { token, newPassword });
 
 // ============================================================================
 // PROFILE
 // ============================================================================
 
+// Fetches the current user's profile.
 export const getProfile = () => api.get('/auth/profile');
+// Updates the current user's name.
 export const updateProfile = (firstName, lastName) => api.put('/auth/profile', { firstName, lastName });
+// Changes the current user's email after verifying their password.
 export const changeEmail = (newEmail, currentPassword) => api.put('/auth/change-email', { newEmail, currentPassword });
+// Changes the current user's password.
 export const changePassword = (currentPassword, newPassword, confirmPassword) =>
   api.put('/auth/change-password', { currentPassword, newPassword, confirmPassword });
 
@@ -72,11 +89,14 @@ export const changePassword = (currentPassword, newPassword, confirmPassword) =>
 // SUPPORT TICKETS (user-facing)
 // ============================================================================
 
+// Submits a new support ticket.
 export const createSupportTicket = (subject, message, priority = 'medium') =>
   api.post('/auth/support', { subject, message, priority });
 
+// Fetches the current user's own support tickets.
 export const getUserTickets = () => api.get('/auth/support');
 
+// Replies to one of the user's own support tickets.
 export const replyToSupportTicket = (ticketId, reply) =>
   api.put(`/auth/support/${ticketId}`, { reply });
 
@@ -84,17 +104,24 @@ export const replyToSupportTicket = (ticketId, reply) =>
 // RECEIPTS
 // ============================================================================
 
+// Uploads a receipt file for OCR processing.
 export const uploadReceipt = (file) => {
   const formData = new FormData();
   formData.append('receipt', file);
   return api.post('/receipts/upload', formData, { headers: { 'Content-Type': 'multipart/form-data' } });
 };
 
+// Creates a receipt from manually entered data (no file).
 export const createManualReceipt = (receiptData) => api.post('/receipts/manual', receiptData);
+// Lists all receipts for the current user.
 export const listReceipts = () => api.get('/receipts');
+// Fetches a single receipt's full details.
 export const getReceiptById = (id) => api.get(`/receipts/${id}`);
+// Updates a receipt's header, items, notes, and tags.
 export const updateReceipt = (id, data) => api.put(`/receipts/${id}`, data);
+// Deletes a receipt and its attached file.
 export const deleteReceipt = (id) => api.delete(`/receipts/${id}`);
+// Builds the authenticated URL used to view/download a receipt's attached file.
 export const getReceiptFileUrl = (id) => {
   const token = localStorage.getItem('token');
   return `http://localhost:3001/receipts/${id}/file?token=${token}`;
@@ -104,34 +131,46 @@ export const getReceiptFileUrl = (id) => {
 // PREMIUM
 // ============================================================================
 
+// Fetches the Premium user's warranty alert preferences.
 export const getPremiumSettings = () => api.get('/premium/settings');
+// Updates the Premium user's warranty alert preferences.
 export const updatePremiumSettings = (alertsEnabled, alertTimeframeDays, alertFrequency) =>
   api.put('/premium/settings', { alertsEnabled, alertTimeframeDays, alertFrequency });
+// Exports all of the Premium user's receipts as a CSV file.
 export const exportReceiptsCsv = () =>
   api.get('/premium/export/csv', { responseType: 'blob' });
+// Sends a one-off test warranty alert email.
 export const sendTestAlert = () => api.post('/premium/alert/test');
 
 // ============================================================================
 // ADMIN — Dashboard
 // ============================================================================
 
+// Fetches system-wide stats and recent admin actions.
 export const getAdminStats = () => api.get('/admin/stats');
 
 // ============================================================================
 // ADMIN — Users
 // ============================================================================
 
+// Searches users by name/email/ID, optionally filtered by role and status.
 export const searchAdminUsers = (q = '', role = 'all', status = 'all') =>
   api.get(`/admin/users?q=${encodeURIComponent(q)}&role=${role}&status=${status}`);
+// Fetches a single user's full admin detail record.
 export const getAdminUser = (id) => api.get(`/admin/users/${id}`);
+// Changes a user's FREE/PREMIUM tier.
 export const adminChangeTier = (id, newTier, reason) =>
   api.put(`/admin/users/${id}/tier`, { newTier, reason });
+// Suspends a user account.
 export const adminSuspendAccount = (id, reason) =>
   api.put(`/admin/users/${id}/suspend`, { reason });
+// Reactivates a suspended user account.
 export const adminReactivateAccount = (id, reason) =>
   api.put(`/admin/users/${id}/reactivate`, { reason });
+// Triggers a password reset email for a user.
 export const adminResetPassword = (id, reason) =>
   api.post(`/admin/users/${id}/reset-password`, { reason });
+// Resets a user's MFA, requiring the admin's own password as confirmation.
 export const adminResetMfa = (id, justification, adminPassword) =>
   api.delete(`/admin/users/${id}/mfa`, { data: { justification, adminPassword } });
 
@@ -139,11 +178,15 @@ export const adminResetMfa = (id, justification, adminPassword) =>
 // ADMIN — Support Tickets
 // ============================================================================
 
+// Lists support tickets, optionally filtered by status and priority.
 export const getAdminTickets = (status = 'all', priority = 'all') =>
   api.get(`/admin/tickets?status=${status}&priority=${priority}`);
+// Fetches a single ticket's full detail.
 export const getAdminTicket = (id) => api.get(`/admin/tickets/${id}`);
+// Saves an admin's response and/or status change on a ticket.
 export const updateAdminTicket = (id, response, status) =>
   api.put(`/admin/tickets/${id}`, { response, status });
+// Creates a test ticket on behalf of a given user.
 export const createAdminTicket = (userId, subject, message, priority = 'medium') =>
   api.post('/admin/tickets', { userId, subject, message, priority });
 
@@ -151,6 +194,7 @@ export const createAdminTicket = (userId, subject, message, priority = 'medium')
 // ADMIN — Audit Logs
 // ============================================================================
 
+// Fetches audit logs matching the given filter object.
 export const getAuditLogs = (filters = {}) => {
   const params = new URLSearchParams();
   Object.entries(filters).forEach(([k, v]) => { if (v) params.append(k, v); });
@@ -189,6 +233,7 @@ export const downloadReport = (filename) =>
 // HEALTH
 // ============================================================================
 
+// Pings the backend health check endpoint.
 export const healthCheck = () => api.get('/health');
 
 export default api;

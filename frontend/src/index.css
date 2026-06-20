@@ -2,74 +2,18 @@
  * File: index.css
  * Author: Arthur Kroth - x22166971
  * WhereIsIt Project
+ *
+ * Small overrides layered on top of global.css design tokens.
+ * Token definitions and Bootstrap re-theming live in global.css.
  */
 
-body {
-  margin: 0;
-  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'Roboto', 'Oxygen',
-    'Ubuntu', 'Cantarell', 'Fira Sans', 'Droid Sans', 'Helvetica Neue',
-    sans-serif;
-  -webkit-font-smoothing: antialiased;
-  -moz-osx-font-smoothing: grayscale;
-  background-color: #f8f9fa;
-}
-
 code {
-  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New',
-    monospace;
+  font-family: source-code-pro, Menlo, Monaco, Consolas, 'Courier New', monospace;
 }
 
-/* Main container styles */
+/* Centered container used by standalone auth pages (Login, Register, VerifyEmail) */
 .main-container {
   min-height: 100vh;
-  padding-top: 20px;
-  padding-bottom: 20px;
-}
-
-/* Navbar customization */
-.navbar-brand {
-  font-weight: bold;
-  font-size: 1.5rem;
-}
-
-/* Card styles for consistent look */
-.card {
-  box-shadow: 0 0.125rem 0.25rem rgba(0, 0, 0, 0.075);
-  margin-bottom: 1rem;
-}
-
-/* Receipt card specific styles */
-.receipt-card {
-  transition: transform 0.2s;
-}
-
-.receipt-card:hover {
-  transform: translateY(-5px);
-  box-shadow: 0 0.5rem 1rem rgba(0, 0, 0, 0.15);
-}
-
-/* Warranty status badges */
-.warranty-active {
-  background-color: #28a745;
-}
-
-.warranty-expiring {
-  background-color: #ffc107;
-}
-
-.warranty-expired {
-  background-color: #dc3545;
-}
-
-/* Form validation feedback */
-.invalid-feedback {
-  display: block;
-}
-
-/* Loading spinner centering */
-.spinner-container {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  min-height: 200px;
+  padding-top: var(--space-5);
+  padding-bottom: var(--space-5);
 }

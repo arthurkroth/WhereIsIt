@@ -4,7 +4,7 @@
  * WhereIsIt Project
  *
  * Enhanced admin audit log viewer.
- * Replaces the previous basic version with:
+ * Replaced the previous basic version with:
  * - Date range filter
  * - Event type filter (dropdown of unique actions)
  * - User ID search
@@ -20,7 +20,9 @@ import {
   Alert, Spinner, Form, InputGroup, Row, Col
 } from 'react-bootstrap';
 import { getAuditLogs } from '../services/api';
+import { formatDateTime } from '../utils/format';
 
+// Admin audit log viewer with filtering, search, and severity colour-coding.
 function AdminAuditLogs() {
   const navigate = useNavigate();
 
@@ -36,8 +38,10 @@ function AdminAuditLogs() {
   const [dateTo, setDateTo] = useState('');
   const [limit, setLimit] = useState('100');
 
+  // Loads audit logs on mount.
   useEffect(() => { fetchLogs(); }, []);
 
+  // Fetches audit logs matching the current filter values.
   const fetchLogs = async () => {
     setLoading(true); setError('');
     try {
@@ -52,11 +56,13 @@ function AdminAuditLogs() {
     }
   };
 
+  // Submits the filter form and refetches logs.
   const handleApplyFilters = (e) => {
     e.preventDefault();
     fetchLogs();
   };
 
+  // Resets every filter and immediately reloads the default (unfiltered) log view.
   const handleClearFilters = () => {
     setSearchTerm(''); setActionFilter('');
     setUserId(''); setDateFrom(''); setDateTo(''); setLimit('100');
@@ -85,6 +91,7 @@ function AdminAuditLogs() {
     return 'info';
   };
 
+  // Maps a log's severity to a Bootstrap badge colour.
   const getActionBadgeVariant = (action) => {
     const sev = getSeverity(action);
     if (sev === 'critical') return 'danger';
@@ -92,19 +99,12 @@ function AdminAuditLogs() {
     return 'secondary';
   };
 
+  // Maps a log's severity to a Bootstrap table row highlight class.
   const getRowClass = (action) => {
     const sev = getSeverity(action);
     if (sev === 'critical') return 'table-danger';
     if (sev === 'security') return 'table-warning';
     return '';
-  };
-
-  const formatDate = (ts) => {
-    if (!ts) return '—';
-    return new Date(ts).toLocaleString('en-GB', {
-      day: '2-digit', month: 'short', year: 'numeric',
-      hour: '2-digit', minute: '2-digit', second: '2-digit'
-    });
   };
 
   const hasActiveFilters = searchTerm || actionFilter || userId || dateFrom || dateTo || limit !== '100';
@@ -242,7 +242,7 @@ function AdminAuditLogs() {
                       </td>
                       <td><small style={{ fontSize: '0.8rem' }}>{log.details}</small></td>
                       <td><small className="text-muted font-monospace" style={{ fontSize: '0.75rem' }}>{log.ip_address || '—'}</small></td>
-                      <td><small className="text-muted" style={{ fontSize: '0.75rem' }}>{formatDate(log.created_at)}</small></td>
+                      <td><small className="text-muted" style={{ fontSize: '0.75rem' }}>{formatDateTime(log.created_at, { second: '2-digit' })}</small></td>
                     </tr>
                   ))}
                 </tbody>

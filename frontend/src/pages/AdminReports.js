@@ -19,7 +19,9 @@ import {
   getReportSchedule, updateReportSchedule,
   generateReport, listReports, downloadReport
 } from '../services/api';
+import { formatDateTime, downloadBlob } from '../utils/format';
 
+// Admin reports page: schedule configuration, on-demand generation, and saved report downloads.
 function AdminReports() {
   const navigate = useNavigate();
 
@@ -40,11 +42,13 @@ function AdminReports() {
   const [loadingReports, setLoadingReports] = useState(true);
   const [downloadingFile, setDownloadingFile] = useState('');
 
+  // Loads the schedule settings and saved report list on mount.
   useEffect(() => {
     fetchSchedule();
     fetchReports();
   }, []);
 
+  // Fetches the current scheduled report settings.
   const fetchSchedule = async () => {
     setLoadingSchedule(true);
     try {
@@ -57,6 +61,7 @@ function AdminReports() {
     }
   };
 
+  // Fetches the list of saved report files.
   const fetchReports = async () => {
     setLoadingReports(true);
     try {
@@ -110,14 +115,7 @@ function AdminReports() {
     try {
       const response = await downloadReport(filename);
       const blob = new Blob([response.data], { type: 'text/plain;charset=utf-8;' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.setAttribute('download', filename);
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
+      downloadBlob(blob, filename);
     } catch {
       // File not found or server error
       alert('Failed to download report file');
@@ -133,14 +131,6 @@ function AdminReports() {
     if (bytes < 1024) return `${bytes} B`;
     if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`;
     return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
-  };
-
-  const formatDate = (ts) => {
-    if (!ts) return '-';
-    return new Date(ts).toLocaleString('en-GB', {
-      day: '2-digit', month: 'short', year: 'numeric',
-      hour: '2-digit', minute: '2-digit'
-    });
   };
 
   /**
@@ -235,7 +225,7 @@ function AdminReports() {
                   {schedule.lastRun && (
                     <Alert variant="light" className="mb-3">
                       <small className="text-muted">
-                        Last report generated: <strong>{formatDate(schedule.lastRun)}</strong>
+                        Last report generated: <strong>{formatDateTime(schedule.lastRun, { fallback: '-' })}</strong>
                       </small>
                     </Alert>
                   )}

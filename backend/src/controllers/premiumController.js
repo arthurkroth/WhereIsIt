@@ -4,10 +4,10 @@
  * WhereIsIt Project
  *
  * Controller for Premium-exclusive features:
- * - GET  /premium/settings       — fetch alert preferences
- * - PUT  /premium/settings       — update alert preferences
- * - GET  /premium/export/csv     — export receipts to CSV download
- * - POST /premium/alert/test     — trigger a test warranty alert email
+ * - GET  /premium/settings       - fetch alert preferences
+ * - PUT  /premium/settings       - update alert preferences
+ * - GET  /premium/export/csv     - export receipts to CSV download
+ * - POST /premium/alert/test     - trigger a test warranty alert email
  */
 
 const { db } = require('../config/db');
@@ -240,26 +240,19 @@ async function exportCsv(req, res) {
  * Uses a 365-day window to guarantee findings even if no warranties
  * are expiring within the user's configured timeframe.
  * If the user has no receipts at all, sends a sample email.
- *
- * Returns the Ethereal preview URL in the response so it can be
- * displayed directly in the browser without needing to check the console.
  */
 async function sendTestAlert(req, res) {
   const userId = req.user.userId;
 
   try {
-    // This actually sends the email — previous version forgot to call it!
+    // This actually sends the email - previous version forgot to call it!
     const result = await runTestAlertForUser(userId);
 
     const message = result.sample
-      ? 'Sample test email sent (you have no receipts with active warranties). Check the link below to preview it.'
-      : `Test alert sent for ${result.itemCount} receipt(s). Check the link below to preview it.`;
+      ? 'Sample test email sent (you have no receipts with active warranties). Check your inbox.'
+      : `Test alert sent for ${result.itemCount} receipt(s). Check your inbox.`;
 
-    return res.json({
-      success: true,
-      message,
-      previewUrl: result.previewUrl  // Ethereal URL — open this in the browser to see the email
-    });
+    return res.json({ success: true, message });
 
   } catch (err) {
     console.error('Test alert error:', err.message);

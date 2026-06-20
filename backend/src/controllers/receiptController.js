@@ -4,7 +4,7 @@
  * WhereIsIt Project
  *
  * KEY CHANGES:
- * - uploadReceipt passes req.user.role to ocrService so Premium → OpenAI, Free → Tesseract
+ * - uploadReceipt passes req.user.role to ocrService so Premium -> OpenAI, Free -> Tesseract
  * - uploadReceipt returns aiProviderError and aiProviderMessage when OpenAI falls back to Tesseract
  * - Storage limit only enforced for FREE role (Premium = unlimited)
  * - listReceipts returns fileType ('pdf'|'image'|null) for advanced frontend filters
@@ -25,6 +25,7 @@ const FREE_TIER_LIMIT = 10;
 // HELPERS
 // ============================================================================
 
+// Computes the warranty expiry date from a purchase date plus a warranty length in months.
 function calculateWarrantyExpiry(purchaseDate, warrantyMonths) {
   const purchase = new Date(purchaseDate);
   const expiry = new Date(purchase);
@@ -32,6 +33,7 @@ function calculateWarrantyExpiry(purchaseDate, warrantyMonths) {
   return expiry.toISOString().split('T')[0];
 }
 
+// Determines whether a warranty is active, expiring soon (<=30 days), or expired.
 function getWarrantyStatus(purchaseDate, warrantyMonths) {
   const now = new Date();
   const expiry = new Date(purchaseDate);
@@ -54,6 +56,7 @@ function getFileType(filePath) {
   return null;
 }
 
+// Encrypts and inserts each line item for a receipt.
 async function insertReceiptItems(receiptId, items) {
   for (const item of items) {
     const encryptedProduct = encryption.encrypt(item.productDescription);
@@ -65,6 +68,7 @@ async function insertReceiptItems(receiptId, items) {
   }
 }
 
+// Fetches and decrypts every line item belonging to a receipt.
 async function getReceiptItems(receiptId) {
   const [rows] = await db.execute(
     `SELECT id, product_desc_enc, price, warranty_months, created_at
@@ -85,7 +89,7 @@ async function getReceiptItems(receiptId) {
 }
 
 /**
- * Checks storage limit — only enforced for FREE tier.
+ * Checks storage limit - only enforced for FREE tier.
  * Premium users always pass this check.
  */
 async function checkStorageLimit(userId, role) {
@@ -106,7 +110,7 @@ async function checkStorageLimit(userId, role) {
  * Handles file upload and OCR processing.
  * Routes to OpenAI (Premium) or Tesseract (Free) based on user role.
  * If OpenAI fails, ocrService automatically falls back to Tesseract and
- * sets aiProviderError = true on the result — this is surfaced to the frontend
+ * sets aiProviderError = true on the result - this is surfaced to the frontend
  * so the user is notified that AI OCR was unavailable.
  */
 async function uploadReceipt(req, res) {

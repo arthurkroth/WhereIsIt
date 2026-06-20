@@ -11,6 +11,7 @@ const bcrypt = require("bcryptjs");
 const { db } = require("../config/db");
 const { asyncHandler } = require("../utils/asyncHandler");
 const { requireAuth } = require("../middleware/authMiddleware");
+const emailService = require("../services/emailService");
 const {
   register,
   login,
@@ -27,7 +28,8 @@ const {
   changePassword,
   createSupportTicket,
   getUserTickets,
-  replyToTicket
+  replyToTicket,
+  allowTriggeredEmail
 } = require("../controllers/authController");
 
 const authRoutes = Router();
@@ -43,7 +45,7 @@ authRoutes.get("/verify-email",         asyncHandler(verifyEmail));
 authRoutes.post("/resend-verification", asyncHandler(resendVerification));
 authRoutes.post("/mfa/login-verify",    asyncHandler(verifyMfaLogin));
 
-// POST /auth/forgot-password — Request password reset
+// POST /auth/forgot-password - Request password reset
 authRoutes.post("/forgot-password", async (req, res) => {
   try {
     const { email } = req.body;
@@ -78,21 +80,13 @@ authRoutes.post("/forgot-password", async (req, res) => {
       );
     } catch (err) { console.log('Audit log skipped:', err.message); }
 
-    const isDevelopment = process.env.NODE_ENV !== 'production';
-    if (isDevelopment) {
+    // The per-address rate limit stops this endpoint from being used to spam a real inbox.
+    if (allowTriggeredEmail(user.email)) {
       try {
-        const emailService = require("../services/emailService");
         await emailService.sendPasswordResetEmail(user.email, user.first_name, resetToken);
       } catch (err) {
         console.error('Failed to send password reset email:', err.message);
       }
-      console.log('Password reset token for', email, ':', resetToken);
-      return res.json({
-        success: true,
-        message: "Password reset token generated (development mode)",
-        resetToken,
-        resetUrl: `http://localhost:3000/reset-password?token=${resetToken}`
-      });
     }
 
     return res.json({
@@ -106,7 +100,7 @@ authRoutes.post("/forgot-password", async (req, res) => {
   }
 });
 
-// POST /auth/reset-password — Reset password using valid token
+// POST /auth/reset-password - Reset password using valid token
 authRoutes.post("/reset-password", async (req, res) => {
   try {
     const { token, newPassword } = req.body;

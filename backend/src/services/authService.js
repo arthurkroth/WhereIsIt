@@ -27,7 +27,7 @@ class AuthService {
 
   /**
    * Registers a new user with a hashed password.
-   * Role is always set to FREE - PREMIUM requires payment (future feature).
+   * Role is always set to FREE - PREMIUM requires manual admin interaction.
    *
    * @param {string} email - User email
    * @param {string} password - Plain text password (will be hashed)
@@ -76,6 +76,8 @@ class AuthService {
    * @returns {string} Signed JWT token
    */
   issueJwt(user) {
+    // Admins get a shorter session lifetime than regular users
+    const expiresIn = user.role === 'ADMIN' ? env.jwt.adminExpiresIn : env.jwt.expiresIn;
     return jwt.sign(
       {
         userId: user.id,
@@ -84,7 +86,7 @@ class AuthService {
         lastName: user.lastName
       },
       env.jwt.secret,
-      { expiresIn: env.jwt.expiresIn }
+      { expiresIn }
     );
   }
 

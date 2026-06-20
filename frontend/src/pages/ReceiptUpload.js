@@ -24,7 +24,7 @@ import TagSelector from '../components/TagSelector';
  * Handles receipt file upload, OCR processing, and the review/confirm step.
  *
  * STEP 1: File selection and upload
- * STEP 2: Split-screen review — edit form on left, receipt preview on right.
+ * STEP 2: Split-screen review - edit form on left, receipt preview on right.
  *         Includes notes and tags fields for optional categorisation.
  *         Shows an AI provider error banner if OpenAI fell back to Tesseract.
  * STEP 3: Save confirmed data and redirect.
@@ -83,6 +83,7 @@ function ReceiptUpload() {
     return () => { if (fileUrl) URL.revokeObjectURL(fileUrl); };
   }, [receiptId]);
 
+  // Checks the selected file's type and size against the allowed limits.
   const validateFile = (file) => {
     if (!file) return { valid: false, error: 'No file selected' };
     if (!ALLOWED_TYPES.includes(file.type)) return { valid: false, error: 'Invalid file type. PNG, JPEG, or PDF only.' };
@@ -90,6 +91,7 @@ function ReceiptUpload() {
     return { valid: true, error: null };
   };
 
+  // Validates and stores the chosen file, resetting any previous review state.
   const handleFileSelect = (file) => {
     const validation = validateFile(file);
     if (!validation.valid) { setError(validation.error); return; }
@@ -113,11 +115,13 @@ function ReceiptUpload() {
     }
   };
 
+  // Handles file selection via the native file input.
   const handleFileChange = (e) => {
     const file = e.target.files?.[0];
     if (file) handleFileSelect(file);
   };
 
+  // Toggles the drag-active highlight as a file is dragged over the drop zone.
   const handleDrag = (e) => {
     e.preventDefault();
     e.stopPropagation();
@@ -125,6 +129,7 @@ function ReceiptUpload() {
     else if (e.type === 'dragleave') setDragActive(false);
   };
 
+  // Handles a file being dropped onto the drop zone.
   const handleDrop = (e) => {
     e.preventDefault();
     e.stopPropagation();
@@ -183,8 +188,10 @@ function ReceiptUpload() {
     }
   };
 
+  // Updates a single field on the reviewed receipt header.
   const handleHeaderChange = (field, value) => setReviewHeader(prev => ({ ...prev, [field]: value }));
 
+  // Updates a single field on one reviewed line item.
   const handleItemChange = (index, field, value) => {
     setReviewItems(prev => {
       const updated = [...prev];
@@ -193,7 +200,9 @@ function ReceiptUpload() {
     });
   };
 
+  // Appends a blank line item to the review form.
   const handleAddItem = () => setReviewItems(prev => [...prev, { productDescription: '', price: '', warrantyMonths: 12 }]);
+  // Removes a reviewed line item, keeping at least one.
   const handleRemoveItem = (index) => { if (reviewItems.length > 1) setReviewItems(prev => prev.filter((_, i) => i !== index)); };
 
   /**
@@ -225,6 +234,7 @@ function ReceiptUpload() {
     }
   };
 
+  // Clears the upload/review state so the user can start over with a new file.
   const handleReset = () => {
     setSelectedFile(null);
     setPreviewUrl(null);
@@ -262,7 +272,7 @@ function ReceiptUpload() {
           </div>
         </div>
 
-        {/* AI provider error — shown when OpenAI fell back to Tesseract */}
+        {/* AI provider error - shown when OpenAI fell back to Tesseract */}
         {aiProviderError && (
           <Alert variant="warning" className="mb-3">
             <strong>⚠ AI OCR unavailable.</strong> {aiProviderMessage}

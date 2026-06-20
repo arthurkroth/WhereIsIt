@@ -34,7 +34,9 @@ const env = {
 
   jwt: {
     secret: requireEnv("JWT_SECRET"),
-    expiresIn: process.env.JWT_EXPIRES_IN || "1h"
+    expiresIn: process.env.JWT_EXPIRES_IN || "1h",
+    // Admins get a shorter session (30 min) than regular users (60 min, above)
+    adminExpiresIn: process.env.ADMIN_JWT_EXPIRES_IN || "30m"
   },
 
   encryption: {
@@ -44,6 +46,12 @@ const env = {
   uploads: {
     dir: process.env.UPLOAD_DIR || "uploads",
     maxFileMb: Number(process.env.MAX_FILE_MB || "10")
+  },
+
+  // Required — all email is sent through Resend.
+  email: {
+    resendApiKey: requireEnv("RESEND_API_KEY"),
+    fromAddress: requireEnv("EMAIL_FROM_ADDRESS")
   }
 };
 

@@ -17,7 +17,9 @@ import {
 import {
   getAdminTickets, getAdminTicket, updateAdminTicket, createAdminTicket
 } from '../services/api';
+import { formatDateTime } from '../utils/format';
 
+// Admin support ticket inbox: list, filter, respond to, and create tickets.
 function AdminSupportTickets() {
   const navigate = useNavigate();
 
@@ -38,7 +40,6 @@ function AdminSupportTickets() {
   const [newStatus, setNewStatus] = useState('');
   const [respondLoading, setRespondLoading] = useState(false);
   const [respondError, setRespondError] = useState('');
-  const [respondPreviewUrl, setRespondPreviewUrl] = useState('');
 
   // Create test ticket modal
   const [showCreateModal, setShowCreateModal] = useState(false);
@@ -46,8 +47,10 @@ function AdminSupportTickets() {
   const [createLoading, setCreateLoading] = useState(false);
   const [createError, setCreateError] = useState('');
 
+  // Reloads tickets whenever the status or priority filter changes.
   useEffect(() => { fetchTickets(); }, [statusFilter, priorityFilter]);
 
+  // Fetches tickets matching the current status/priority filters.
   const fetchTickets = async () => {
     setLoading(true); setError('');
     try {
@@ -60,8 +63,9 @@ function AdminSupportTickets() {
     }
   };
 
+  // Loads a single ticket's full detail and opens the detail modal.
   const handleViewTicket = async (ticketId) => {
-    setLoadingTicket(true); setRespondError(''); setRespondPreviewUrl('');
+    setLoadingTicket(true); setRespondError('');
     try {
       const response = await getAdminTicket(ticketId);
       setSelectedTicket(response.data.ticket);
@@ -75,14 +79,14 @@ function AdminSupportTickets() {
     }
   };
 
+  // Saves the admin's response and/or status change for the selected ticket.
   const handleRespond = async () => {
     if (!responseText.trim() && newStatus === selectedTicket.status) {
       setRespondError('Please add a response or change the status'); return;
     }
-    setRespondLoading(true); setRespondError(''); setRespondPreviewUrl('');
+    setRespondLoading(true); setRespondError('');
     try {
-      const response = await updateAdminTicket(selectedTicket.id, responseText.trim(), newStatus);
-      setRespondPreviewUrl(response.data.previewUrl || '');
+      await updateAdminTicket(selectedTicket.id, responseText.trim(), newStatus);
       setSuccessMsg(`Ticket #${selectedTicket.id} updated successfully`);
       setShowDetailModal(false);
       fetchTickets();
@@ -94,6 +98,7 @@ function AdminSupportTickets() {
     }
   };
 
+  // Creates a test support ticket on behalf of a given user ID.
   const handleCreateTicket = async () => {
     if (!createForm.userId || !createForm.subject || !createForm.message) {
       setCreateError('All fields are required'); return;
@@ -113,6 +118,7 @@ function AdminSupportTickets() {
     }
   };
 
+  // Renders a coloured badge for a ticket's status.
   const getStatusBadge = (status) => {
     if (status === 'open')        return <Badge bg="danger">Open</Badge>;
     if (status === 'in_progress') return <Badge bg="warning" text="dark">In Progress</Badge>;
@@ -120,18 +126,11 @@ function AdminSupportTickets() {
     return <Badge bg="secondary">{status}</Badge>;
   };
 
+  // Renders a coloured badge for a ticket's priority.
   const getPriorityBadge = (priority) => {
     if (priority === 'high')   return <Badge bg="danger">High</Badge>;
     if (priority === 'medium') return <Badge bg="warning" text="dark">Medium</Badge>;
     return <Badge bg="secondary">Low</Badge>;
-  };
-
-  const formatDate = (ts) => {
-    if (!ts) return '—';
-    return new Date(ts).toLocaleString('en-GB', {
-      day: '2-digit', month: 'short', year: 'numeric',
-      hour: '2-digit', minute: '2-digit'
-    });
   };
 
   return (
@@ -149,14 +148,8 @@ function AdminSupportTickets() {
 
       {error && <Alert variant="danger" dismissible onClose={() => setError('')}>{error}</Alert>}
       {successMsg && (
-        <Alert variant="success" dismissible onClose={() => { setSuccessMsg(''); setRespondPreviewUrl(''); }}>
+        <Alert variant="success" dismissible onClose={() => setSuccessMsg('')}>
           {successMsg}
-          {respondPreviewUrl && (
-            <div className="mt-2">
-              <a href={respondPreviewUrl} target="_blank" rel="noopener noreferrer"
-                className="btn btn-sm btn-outline-success">📧 Open Email Preview</a>
-            </div>
-          )}
         </Alert>
       )}
 
@@ -234,7 +227,7 @@ function AdminSupportTickets() {
                           ? <Badge bg="info">Replied</Badge>
                           : <span className="text-muted small">—</span>}
                       </td>
-                      <td><small className="text-muted">{formatDate(ticket.created_at)}</small></td>
+                      <td><small className="text-muted">{formatDateTime(ticket.created_at)}</small></td>
                       <td>
                         <Button variant="outline-primary" size="sm"
                           onClick={(e) => { e.stopPropagation(); handleViewTicket(ticket.id); }}
@@ -265,7 +258,7 @@ function AdminSupportTickets() {
               {getStatusBadge(selectedTicket.status)}
               {getPriorityBadge(selectedTicket.priority)}
               <Badge bg="secondary">{selectedTicket.first_name} {selectedTicket.last_name}</Badge>
-              <small className="text-muted ms-auto">{formatDate(selectedTicket.created_at)}</small>
+              <small className="text-muted ms-auto">{formatDateTime(selectedTicket.created_at)}</small>
             </div>
 
             {/* Original user message */}
@@ -294,7 +287,7 @@ function AdminSupportTickets() {
               <Card className="mb-3 border-warning">
                 <Card.Body>
                   <strong className="d-block mb-2 text-warning" style={{ fontSize: '0.8rem' }}>
-                    USER REPLY — {formatDate(selectedTicket.user_replied_at)}:
+                    USER REPLY — {formatDateTime(selectedTicket.user_replied_at)}:
                   </strong>
                   <p className="mb-0" style={{ whiteSpace: 'pre-wrap' }}>{selectedTicket.user_reply}</p>
                 </Card.Body>

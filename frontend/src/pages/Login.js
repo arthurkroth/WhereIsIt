@@ -5,10 +5,11 @@
  */
 
 import React, { useState } from 'react';
-import { Container, Row, Col, Card, Form, Button, Alert, Spinner } from 'react-bootstrap';
-import { useNavigate, Link } from 'react-router-dom';
+import { Card, Form, Button, Alert, Spinner } from 'react-bootstrap';
+import { useNavigate, useLocation, Link } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 import { login, verifyMfaLogin, getCaptcha, resendVerification } from '../services/api';
+import logoIcon from '../assets/logo-icon.svg';
 
 /**
  * Login page component.
@@ -22,7 +23,9 @@ import { login, verifyMfaLogin, getCaptcha, resendVerification } from '../servic
  */
 const Login = () => {
   const navigate = useNavigate();
+  const location = useLocation();
   const { loginUser } = useAuth();
+  const infoMessage = location.state?.message;
 
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
@@ -170,6 +173,7 @@ const Login = () => {
     }
   };
 
+  // Cancels the MFA step and returns the user to the email/password form.
   const handleBackToLogin = () => {
     setShowMfa(false);
     setMfaToken('');
@@ -178,15 +182,21 @@ const Login = () => {
   };
 
   return (
-    <Container className="main-container">
-      <Row className="justify-content-center">
-        <Col md={6} lg={5}>
-          <Card>
-            <Card.Body>
-              <h2 className="text-center mb-4">
-                {showMfa ? 'Two-Factor Authentication' : 'Login to WhereIsIt?'}
+    <div className="auth-shell">
+      <div className="auth-card-wrap">
+        <Link to="/">
+          <img src={logoIcon} alt="WhereIsIt?" className="auth-logo" />
+        </Link>
+        <Card className="auth-card">
+          <Card.Body className="p-4 p-md-5">
+              <h2 className="text-center mb-1 fw-bold">
+                {showMfa ? 'Two-Factor Authentication' : 'Welcome back'}
               </h2>
+              {!showMfa && (
+                <p className="text-center text-secondary mb-4">Login to your WhereIsIt? account</p>
+              )}
 
+              {infoMessage && !error && <Alert variant="info" className="mb-3">{infoMessage}</Alert>}
               {error && <Alert variant="danger" className="mb-3">{error}</Alert>}
 
               {/* Unverified email prompt */}
@@ -314,11 +324,13 @@ const Login = () => {
                   <p><Link to="/forgot-password">Forgot your password?</Link></p>
                 </div>
               )}
-            </Card.Body>
-          </Card>
-        </Col>
-      </Row>
-    </Container>
+          </Card.Body>
+        </Card>
+        <p className="auth-footer-link">
+          <Link to="/">← Back to home</Link>
+        </p>
+      </div>
+    </div>
   );
 };
 

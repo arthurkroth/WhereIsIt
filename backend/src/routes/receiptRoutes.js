@@ -8,6 +8,7 @@ const { Router } = require("express");
 const multer = require("multer");
 const path = require("path");
 const { requireAuth } = require("../middleware/authMiddleware");
+const { asyncHandler } = require("../utils/asyncHandler");
 const {
   uploadReceipt,
   createManualReceipt,
@@ -78,75 +79,26 @@ receiptRoutes.post(
   "/upload",
   requireAuth,
   upload.single('receipt'), // Expects field name 'receipt' in multipart form
-  async (req, res) => {
-    try {
-      await uploadReceipt(req, res);
-    } catch (error) {
-      console.error('Upload route error:', error);
-      res.status(500).json({ error: 'Upload failed' });
-    }
-  }
+  asyncHandler(uploadReceipt)
 );
 
 // POST /receipts/manual - Create receipt with manual entry (no file)
-receiptRoutes.post("/manual", requireAuth, async (req, res) => {
-  try {
-    await createManualReceipt(req, res);
-  } catch (error) {
-    console.error('Manual entry route error:', error);
-    res.status(500).json({ error: 'Failed to create receipt' });
-  }
-});
+receiptRoutes.post("/manual", requireAuth, asyncHandler(createManualReceipt));
 
 // GET /receipts - List all receipts for user
-receiptRoutes.get("/", requireAuth, async (req, res) => {
-  try {
-    await listReceipts(req, res);
-  } catch (error) {
-    console.error('List receipts route error:', error);
-    res.status(500).json({ error: 'Failed to retrieve receipts' });
-  }
-});
+receiptRoutes.get("/", requireAuth, asyncHandler(listReceipts));
 
 // GET /receipts/:id - Get a single receipt by ID
-receiptRoutes.get("/:id", requireAuth, async (req, res) => {
-  try {
-    await getReceiptById(req, res);
-  } catch (error) {
-    console.error('Get receipt route error:', error);
-    res.status(500).json({ error: 'Failed to retrieve receipt' });
-  }
-});
+receiptRoutes.get("/:id", requireAuth, asyncHandler(getReceiptById));
 
 // GET /receipts/:id/file - Serve the receipt file securely
-receiptRoutes.get("/:id/file", requireAuth, async (req, res) => {
-  try {
-    await getReceiptFile(req, res);
-  } catch (error) {
-    console.error('Get receipt file route error:', error);
-    res.status(500).json({ error: 'Failed to retrieve file' });
-  }
-});
+receiptRoutes.get("/:id/file", requireAuth, asyncHandler(getReceiptFile));
 
 // PUT /receipts/:id - Update receipt data
-receiptRoutes.put("/:id", requireAuth, async (req, res) => {
-  try {
-    await updateReceipt(req, res);
-  } catch (error) {
-    console.error('Update receipt route error:', error);
-    res.status(500).json({ error: 'Failed to update receipt' });
-  }
-});
+receiptRoutes.put("/:id", requireAuth, asyncHandler(updateReceipt));
 
 // DELETE /receipts/:id - Delete receipt and file
-receiptRoutes.delete("/:id", requireAuth, async (req, res) => {
-  try {
-    await deleteReceipt(req, res);
-  } catch (error) {
-    console.error('Delete receipt route error:', error);
-    res.status(500).json({ error: 'Failed to delete receipt' });
-  }
-});
+receiptRoutes.delete("/:id", requireAuth, asyncHandler(deleteReceipt));
 
 /**
  * Error handling middleware for multer errors.

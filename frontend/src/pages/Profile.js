@@ -24,7 +24,9 @@ import {
   getPremiumSettings, updatePremiumSettings, sendTestAlert,
   createSupportTicket, getUserTickets, replyToSupportTicket
 } from '../services/api';
+import { formatDate } from '../utils/format';
 
+// Profile page with tabs for account details, password, MFA, Premium settings, and support.
 function Profile() {
   const { user } = useAuth();
 
@@ -68,7 +70,6 @@ function Profile() {
   const [premiumError, setPremiumError] = useState('');
   const [testAlertLoading, setTestAlertLoading] = useState(false);
   const [testAlertMsg, setTestAlertMsg] = useState('');
-  const [testAlertPreviewUrl, setTestAlertPreviewUrl] = useState('');
 
   // Tab 5: Support
   const [supportForm, setSupportForm] = useState({ subject: '', message: '', priority: 'medium' });
@@ -82,8 +83,10 @@ function Profile() {
 
   const isPremium = profile?.role === 'PREMIUM' || user?.role === 'PREMIUM';
 
+  // Loads the user's profile on mount.
   useEffect(() => { fetchProfile(); }, []);
 
+  // Fetches the current user's profile and seeds the account-details form.
   const fetchProfile = async () => {
     setLoadingProfile(true); setProfileLoadError('');
     try {
@@ -99,6 +102,7 @@ function Profile() {
     }
   };
 
+  // Fetches the Premium user's warranty alert preferences.
   const fetchPremiumSettings = async () => {
     setLoadingPremium(true);
     try {
@@ -111,6 +115,7 @@ function Profile() {
     }
   };
 
+  // Fetches the user's own support ticket history.
   const fetchTickets = async () => {
     setLoadingTickets(true);
     try {
@@ -121,11 +126,13 @@ function Profile() {
     }
   };
 
+  // Pulls the raw TOTP secret out of an otpauth:// URL for manual entry.
   const extractSecret = (url) => {
     try { return new URL(url).searchParams.get('secret') || null; } catch { return null; }
   };
 
   // ── Tab 1 ──────────────────────────────────────────────────────────────────
+  // Saves the user's first/last name.
   const handleSaveName = async (e) => {
     e.preventDefault();
     setNameSuccess(''); setNameError('');
@@ -139,6 +146,7 @@ function Profile() {
     finally { setSavingName(false); }
   };
 
+  // Changes the user's email address after verifying their current password.
   const handleChangeEmail = async (e) => {
     e.preventDefault();
     setEmailSuccess(''); setEmailError('');
@@ -155,6 +163,7 @@ function Profile() {
   };
 
   // ── Tab 2 ──────────────────────────────────────────────────────────────────
+  // Validates and submits a password change request.
   const handleChangePassword = async (e) => {
     e.preventDefault();
     setPasswordSuccess(''); setPasswordError('');
@@ -174,6 +183,7 @@ function Profile() {
   };
 
   // ── Tab 3: MFA ─────────────────────────────────────────────────────────────
+  // Requests a new otpauth URL/QR code to start MFA setup.
   const handleBeginMfa = async () => {
     setMfaError(''); setMfaSuccess(''); setMfaLoading(true); setShowSecretText(false);
     try {
@@ -184,6 +194,7 @@ function Profile() {
     finally { setMfaLoading(false); }
   };
 
+  // Verifies the first TOTP code and enables MFA, showing recovery codes on success.
   const handleConfirmMfa = async (e) => {
     e.preventDefault();
     if (!mfaToken || mfaToken.length < 6) { setMfaError('Enter a valid 6-digit code'); return; }
@@ -200,6 +211,7 @@ function Profile() {
     finally { setMfaLoading(false); }
   };
 
+  // Disables MFA after the user confirms via a browser dialog.
   const handleDisableMfa = async () => {
     if (!window.confirm('Disable two-factor authentication? This will make your account less secure.')) return;
     setMfaLoading(true); setMfaError('');
@@ -211,11 +223,13 @@ function Profile() {
     finally { setMfaLoading(false); }
   };
 
+  // Resets the MFA setup wizard back to its idle state.
   const handleResetMfaSetup = () => {
     setMfaStep('idle'); setOtpauthUrl(''); setMfaToken('');
     setMfaError(''); setMfaSuccess(''); setShowSecretText(false);
   };
 
+  // Copies the recovery codes to the clipboard and shows a brief confirmation.
   const handleCopyCodes = () => {
     navigator.clipboard.writeText(recoveryCodes.join('\n')).then(() => {
       setCopiedCodes(true);
@@ -224,6 +238,7 @@ function Profile() {
   };
 
   // ── Tab 4: Premium ─────────────────────────────────────────────────────────
+  // Saves the Premium user's warranty alert preferences.
   const handleSavePremiumSettings = async (e) => {
     e.preventDefault();
     setPremiumSuccess(''); setPremiumError('');
@@ -239,17 +254,18 @@ function Profile() {
     finally { setSavingPremium(false); }
   };
 
+  // Triggers a one-off test warranty alert email.
   const handleSendTestAlert = async () => {
-    setTestAlertLoading(true); setTestAlertMsg(''); setTestAlertPreviewUrl('');
+    setTestAlertLoading(true); setTestAlertMsg('');
     try {
       const response = await sendTestAlert();
       setTestAlertMsg(response.data.message);
-      setTestAlertPreviewUrl(response.data.previewUrl || '');
     } catch { setTestAlertMsg('Failed to send test alert.'); }
     finally { setTestAlertLoading(false); }
   };
 
   // ── Tab 5: Support ─────────────────────────────────────────────────────────
+  // Validates and submits a new support ticket.
   const handleSubmitTicket = async (e) => {
     e.preventDefault();
     setSupportSuccess(''); setSupportError('');
@@ -309,6 +325,7 @@ function Profile() {
     }
   };
 
+  // Renders a coloured badge for a ticket's status.
   const getStatusBadge = (status) => {
     if (status === 'open')        return <Badge bg="danger">Open</Badge>;
     if (status === 'in_progress') return <Badge bg="warning" text="dark">In Progress</Badge>;
@@ -316,15 +333,11 @@ function Profile() {
     return <Badge bg="secondary">{status}</Badge>;
   };
 
+  // Renders a coloured badge for a ticket's priority.
   const getPriorityBadge = (priority) => {
     if (priority === 'high')   return <Badge bg="danger">High</Badge>;
     if (priority === 'medium') return <Badge bg="warning" text="dark">Medium</Badge>;
     return <Badge bg="secondary">Low</Badge>;
-  };
-
-  const formatDate = (ts) => {
-    if (!ts) return '—';
-    return new Date(ts).toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
   };
 
   if (loadingProfile) return (
@@ -638,12 +651,6 @@ function Profile() {
                           {testAlertMsg && (
                             <Alert variant="info" className="mt-3 mb-0">
                               {testAlertMsg}
-                              {testAlertPreviewUrl && (
-                                <div className="mt-2">
-                                  <a href={testAlertPreviewUrl} target="_blank" rel="noopener noreferrer"
-                                    className="btn btn-sm btn-outline-primary">📧 Open Email Preview</a>
-                                </div>
-                              )}
                             </Alert>
                           )}
                         </Form>

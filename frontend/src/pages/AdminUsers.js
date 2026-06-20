@@ -16,7 +16,9 @@ import {
   Alert, Spinner, InputGroup, Form, Row, Col
 } from 'react-bootstrap';
 import { searchAdminUsers } from '../services/api';
+import { formatDate } from '../utils/format';
 
+// Admin user search/listing page; clicking a row opens AdminUserDetail.
 function AdminUsers() {
   const navigate = useNavigate();
 
@@ -31,6 +33,7 @@ function AdminUsers() {
   // Load all users on mount
   useEffect(() => { fetchUsers(); }, []);
 
+  // Fetches users matching the given search term, role, and status filters.
   const fetchUsers = async (q = '', role = 'all', status = 'all') => {
     setLoading(true); setError('');
     try {
@@ -43,29 +46,26 @@ function AdminUsers() {
     }
   };
 
+  // Submits the search form with the current filter values.
   const handleSearch = (e) => {
     e.preventDefault();
     fetchUsers(searchTerm, roleFilter, statusFilter);
   };
 
+  // Resets all filters and reloads the full user list.
   const handleClear = () => {
     setSearchTerm(''); setRoleFilter('all'); setStatusFilter('all');
     fetchUsers('', 'all', 'all');
   };
 
-  const formatDate = (ts) => {
-    if (!ts) return '—';
-    return new Date(ts).toLocaleDateString('en-GB', {
-      day: '2-digit', month: 'short', year: 'numeric'
-    });
-  };
-
+  // Renders a coloured badge for a user's role.
   const getRoleBadge = (role) => {
     if (role === 'PREMIUM') return <Badge bg="warning" text="dark">PREMIUM</Badge>;
     if (role === 'ADMIN')   return <Badge bg="danger">ADMIN</Badge>;
     return <Badge bg="secondary">FREE</Badge>;
   };
 
+  // Renders a coloured badge for a user's account status.
   const getStatusBadge = (status) => {
     if (status === 'suspended') return <Badge bg="danger">Suspended</Badge>;
     return <Badge bg="success">Active</Badge>;
