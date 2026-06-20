@@ -25,7 +25,6 @@
  */
 
 const cron = require('node-cron');
-const nodemailer = require('nodemailer');
 const { db } = require('../config/db');
 const { EncryptionService } = require('../services/encryptionService');
 const emailService = require('../services/emailService');
@@ -81,11 +80,9 @@ async function runDailyWarrantyCheck() {
  * Sends a test warranty alert email for a specific user.
  * Uses a 365-day window to guarantee at least some results.
  * If the user has no receipts at all, sends a sample test email.
- * Returns the Ethereal preview URL so the console (and optionally
- * the frontend) can display it.
  *
  * @param {number} userId - ID of the Premium user requesting the test
- * @returns {Promise<{sent: boolean, previewUrl: string|null, itemCount: number}>}
+ * @returns {Promise<{sent: boolean, itemCount: number}>}
  */
 async function runTestAlertForUser(userId) {
   // Fetch user details and their alert preferences
@@ -110,17 +107,16 @@ async function runTestAlertForUser(userId) {
 
   // If still no items, send a sample test email explaining this
   if (expiringItems.length === 0) {
-    const previewUrl = await sendSampleTestEmail(user);
-    return { sent: true, previewUrl, itemCount: 0, sample: true };
+    await sendSampleTestEmail(user);
+    return { sent: true, itemCount: 0, sample: true };
   }
 
   // Send the real alert using the user's configured frequency
-  let previewUrl = null;
   if (user.alert_frequency === 'immediate') {
     // Only send the first item for the test to avoid spamming
-    previewUrl = await sendImmediateAlert(user, expiringItems[0]);
+    await sendImmediateAlert(user, expiringItems[0]);
   } else {
-    previewUrl = await sendDigestAlert(user, expiringItems);
+    await sendDigestAlert(user, expiringItems);
   }
 
   // Log the test alert
@@ -133,7 +129,7 @@ async function runTestAlertForUser(userId) {
     console.log('Audit log skipped:', err.message);
   }
 
-  return { sent: true, previewUrl, itemCount: expiringItems.length, sample: false };
+  return { sent: true, itemCount: expiringItems.length, sample: false };
 }
 
 /**
@@ -239,11 +235,10 @@ async function getExpiringWarranties(userId, timeframeDays) {
 /**
  * Sends a digest email listing all expiring warranty items.
  * Used for daily and weekly frequency settings.
- * Returns the Ethereal preview URL.
  *
  * @param {Object} user
  * @param {Array} items
- * @returns {Promise<string|null>} Ethereal preview URL
+ * @returns {Promise<void>}
  */
 async function sendDigestAlert(user, items) {
   const subject = `WhereIsIt? — ${items.length} warranty${items.length > 1 ? 'ies' : 'y'} expiring soon`;
@@ -300,11 +295,10 @@ async function sendDigestAlert(user, items) {
 /**
  * Sends an individual email for a single expiring warranty item.
  * Used for the "immediate" frequency setting.
- * Returns the Ethereal preview URL.
  *
  * @param {Object} user
  * @param {Object} item
- * @returns {Promise<string|null>} Ethereal preview URL
+ * @returns {Promise<void>}
  */
 async function sendImmediateAlert(user, item) {
   const subject = `WhereIsIt? — Warranty expiring in ${item.daysLeft} days: ${item.productDescription}`;
@@ -341,10 +335,9 @@ async function sendImmediateAlert(user, item) {
 /**
  * Sends a sample test email when the user has no receipts at all.
  * Shows what a real warranty alert would look like.
- * Returns the Ethereal preview URL.
  *
  * @param {Object} user
- * @returns {Promise<string|null>} Ethereal preview URL
+ * @returns {Promise<void>}
  */
 async function sendSampleTestEmail(user) {
   const subject = 'WhereIsIt? — Test Warranty Alert (Sample)';
@@ -386,35 +379,15 @@ async function sendSampleTestEmail(user) {
 }
 
 /**
- * Sends an email via the shared emailService transport.
- * Logs the Ethereal preview URL to the backend console.
- * Returns the preview URL so callers can surface it further.
+ * Sends an email via the shared emailService.sendEmail() (Resend).
  *
  * @param {string} toEmail
  * @param {string} subject
  * @param {string} html
- * @returns {Promise<string|null>} Ethereal preview URL
+ * @returns {Promise<void>}
  */
 async function sendAlertEmail(toEmail, subject, html) {
-  const transporter = await emailService.getTransporter();
-
-  const info = await transporter.sendMail({
-    from: '"WhereIsIt?" <noreply@whereis.it>',
-    to: toEmail,
-    subject,
-    html
-  });
-
-  const previewUrl = nodemailer.getTestMessageUrl(info);
-
-  if (previewUrl) {
-    console.log('─────────────────────────────────────────────────────');
-    console.log(`   Warranty alert sent to: ${toEmail}`);
-    console.log(`    Preview URL: ${previewUrl}`);
-    console.log('─────────────────────────────────────────────────────');
-  }
-
-  return previewUrl || null;
+  await emailService.sendEmail({ to: toEmail, subject, html });
 }
 
 module.exports = { startWarrantyAlertService, runDailyWarrantyCheck, runTestAlertForUser };

@@ -5,9 +5,10 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { Container, Card, Form, Button, Alert, Spinner } from 'react-bootstrap';
+import { Card, Form, Button, Alert, Spinner } from 'react-bootstrap';
 import { Link, useNavigate, useSearchParams } from 'react-router-dom';
 import { resetPassword } from '../services/api';
+import logoIcon from '../assets/logo-icon.svg';
 
 /**
  * ResetPassword Page
@@ -136,14 +137,16 @@ function ResetPassword() {
   const strength = getPasswordStrength(newPassword);
 
   return (
-    <Container className="mt-5">
-      <div className="row justify-content-center">
-        <div className="col-md-6 col-lg-5">
-          <Card>
-            <Card.Header className="bg-primary text-white">
-              <h4 className="mb-0">Reset Password</h4>
-            </Card.Header>
-            <Card.Body>
+    <div className="auth-shell">
+      <div className="auth-card-wrap">
+        <Link to="/">
+          <img src={logoIcon} alt="WhereIsIt?" className="auth-logo" />
+        </Link>
+        <Card className="auth-card">
+          <Card.Header className="bg-primary text-white">
+            <h4 className="mb-0">Reset Password</h4>
+          </Card.Header>
+          <Card.Body>
               {error && (
                 <Alert variant="danger" className="mb-3">
                   {error}
@@ -258,23 +261,22 @@ function ResetPassword() {
                   <Link to="/login">Back to Login</Link>
                 </p>
               </div>
-            </Card.Body>
-          </Card>
+          </Card.Body>
+        </Card>
 
-          <Alert variant="info" className="mt-3">
-            <small>
-              <strong>Security Tips:</strong>
-              <ul className="mb-0 mt-2">
-                <li>Use a strong, unique password</li>
-                <li>Don't reuse passwords from other sites</li>
-                <li>Consider using a password manager</li>
-                <li>Reset tokens expire after 1 hour</li>
-              </ul>
-            </small>
-          </Alert>
-        </div>
+        <Alert variant="info" className="mt-3">
+          <small>
+            <strong>Security Tips:</strong>
+            <ul className="mb-0 mt-2">
+              <li>Use a strong, unique password</li>
+              <li>Don't reuse passwords from other sites</li>
+              <li>Consider using a password manager</li>
+              <li>Reset tokens expire after 1 hour</li>
+            </ul>
+          </small>
+        </Alert>
       </div>
-    </Container>
+    </div>
   );
 }
 

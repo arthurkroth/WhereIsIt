@@ -6,22 +6,23 @@
 
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate, useSearchParams, Link } from 'react-router-dom';
-import { Container, Row, Col, Card, Alert, Spinner, Button } from 'react-bootstrap';
+import { Card, Alert, Spinner, Button } from 'react-bootstrap';
 import { verifyEmail } from '../services/api';
+import logoIcon from '../assets/logo-icon.svg';
 
 /**
  * VerifyEmail Page
  * Handles the email verification link clicked by the user from their inbox.
  *
  * Flow:
- * 1. User registers → verification email sent → console shows Ethereal preview URL
+ * 1. User registers > verification email sent > console shows Ethereal preview URL
  * 2. User opens the email and clicks "Verify Email Address"
  * 3. Browser navigates to /verify-email?token=...
  * 4. This page reads the token from the URL and calls the backend once
  * 5. On success, shows a confirmation and redirects to login after 3 seconds
  * 6. On failure (expired/invalid), shows an error with a back to login option
  *
- * IMPORTANT — React StrictMode double-invocation guard:
+ * IMPORTANT - React StrictMode double-invocation guard:
  * In development, React 18 StrictMode intentionally mounts components twice
  * to detect side effects. Without a guard, the verify API call would fire twice:
  * - First call succeeds and clears the token from the database
@@ -88,13 +89,15 @@ function VerifyEmail() {
   }, []);
 
   return (
-    <Container className="main-container">
-      <Row className="justify-content-center">
-        <Col md={6} lg={5}>
-          <Card>
-            <Card.Body className="text-center py-5">
+    <div className="auth-shell">
+      <div className="auth-card-wrap">
+        <Link to="/">
+          <img src={logoIcon} alt="WhereIsIt?" className="auth-logo" />
+        </Link>
+        <Card className="auth-card">
+          <Card.Body className="text-center py-5">
 
-              {/* Verifying — spinner */}
+              {/* Verifying - spinner */}
               {status === 'verifying' && (
                 <>
                   <Spinner animation="border" variant="primary" className="mb-3" />
@@ -158,11 +161,10 @@ function VerifyEmail() {
                 </>
               )}
 
-            </Card.Body>
-          </Card>
-        </Col>
-      </Row>
-    </Container>
+          </Card.Body>
+        </Card>
+      </div>
+    </div>
   );
 }
 

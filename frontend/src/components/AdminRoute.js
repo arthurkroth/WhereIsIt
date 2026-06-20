@@ -9,6 +9,7 @@ import { Navigate } from 'react-router-dom';
 import { useAuth } from '../context/AuthContext';
 
 
+// Gates a route behind authentication and the ADMIN role specifically.
 function AdminRoute({ children }) {
   const { isAuthenticated, hasRole } = useAuth();
 

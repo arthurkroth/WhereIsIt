@@ -3,7 +3,7 @@
  * Author: Arthur Kroth - x22166971
  * WhereIsIt Project
  *
- * ADDED: replyToTicket — allows users to reply to their own support tickets
+ * ADDED: replyToTicket - allows users to reply to their own support tickets
  * when an admin has responded and the ticket is not yet resolved.
  */
 
@@ -29,8 +29,35 @@ const audit = new AuditLogService();
 
 const captchaStore = new Map();
 const failedLoginAttempts = new Map();
+const mfaFailedAttempts = new Map();
 const CAPTCHA_THRESHOLD = 3;
 const CAPTCHA_EXPIRY_MS = 5 * 60 * 1000;
+const LOCKOUT_THRESHOLD = 5;
+const USER_LOCKOUT_MS = 30 * 60 * 1000;
+const ADMIN_LOCKOUT_MS = 60 * 60 * 1000;
+const MFA_COOLDOWN_THRESHOLD = 3;
+const MFA_COOLDOWN_MS = 5 * 60 * 1000;
+
+// Caps how often a real email can actually be triggered to a given address.
+// Without this, forgot-password/resend-verification could be used to spam a
+// real victim's inbox now that emails are genuinely delivered - This was a security vulnerability found on static analysis.
+const emailRateLimits = new Map();
+const EMAIL_RATE_LIMIT_MAX = 3;
+const EMAIL_RATE_LIMIT_WINDOW_MS = 60 * 60 * 1000;
+
+// Returns true if another triggered email may be sent to this address right
+// now, and records the attempt. Returns false once the rolling-hour cap is hit.
+function allowTriggeredEmail(email) {
+  const now = Date.now();
+  const entry = emailRateLimits.get(email);
+  if (!entry || entry.windowStart + EMAIL_RATE_LIMIT_WINDOW_MS < now) {
+    emailRateLimits.set(email, { count: 1, windowStart: now });
+    return true;
+  }
+  if (entry.count >= EMAIL_RATE_LIMIT_MAX) return false;
+  entry.count += 1;
+  return true;
+}
 
 setInterval(() => {
   const now = Date.now();
@@ -38,6 +65,15 @@ setInterval(() => {
     if (data.expiresAt < now) captchaStore.delete(id);
   }
 }, 60 * 1000);
+
+// Sends an email to every admin account warning that another account was locked out.
+async function notifyAdminsOfLockout(lockedEmail) {
+  const [admins] = await db.execute("SELECT email FROM users WHERE role = 'ADMIN'");
+  for (const admin of admins) {
+    try { await emailService.sendAdminLockoutAlert(admin.email, lockedEmail); }
+    catch (err) { console.error('Failed to send admin lockout alert:', err.message); }
+  }
+}
 
 /**
  * GET /auth/captcha
@@ -52,18 +88,21 @@ async function getCaptcha(req, res) {
 }
 
 // ============================================================================
-// RECOVERY CODES — helpers
+// RECOVERY CODES - helpers
 // ============================================================================
 
+// Generates a random recovery code in XXXXXX-XXXXXX-XXXXXX format.
 function generateRecoveryCode() {
   const segment = () => crypto.randomBytes(3).toString('hex').toUpperCase();
   return `${segment()}-${segment()}-${segment()}`;
 }
 
+// Hashes a recovery code for storage (codes are never stored in plain text).
 function hashRecoveryCode(code) {
   return crypto.createHash('sha256').update(code).digest('hex');
 }
 
+// Replaces a user's recovery codes with a fresh set of 8 and returns the plain-text codes once.
 async function createRecoveryCodes(userId) {
   await db.execute('DELETE FROM mfa_recovery_codes WHERE user_id = ?', [userId]);
   const codes = [];
@@ -79,9 +118,10 @@ async function createRecoveryCodes(userId) {
 }
 
 // ============================================================================
-// EMAIL VERIFICATION — helpers
+// EMAIL VERIFICATION - helpers
 // ============================================================================
 
+// Generates a verification token, stores its hash, and emails the plain token to the user.
 async function sendVerificationEmail(userId, email, firstName) {
   const plainToken = crypto.randomBytes(32).toString('hex');
   const hashedToken = crypto.createHash('sha256').update(plainToken).digest('hex');
@@ -103,9 +143,18 @@ async function register(req, res) {
   const parsed = registerSchema.parse(req.body);
   const role = 'FREE';
 
-  const userId = await authService.register(
-    parsed.email, parsed.password, role, parsed.firstName, parsed.lastName
-  );
+  let userId;
+  try {
+    userId = await authService.register(
+      parsed.email, parsed.password, role, parsed.firstName, parsed.lastName
+    );
+  } catch (err) {
+    // Duplicate email - return a clean error without leaking the raw DB message
+    if (err.code === 'ER_DUP_ENTRY') {
+      return res.status(409).json({ error: 'An account with this email already exists.' });
+    }
+    throw err;
+  }
 
   try {
     await sendVerificationEmail(userId, parsed.email, parsed.firstName);
@@ -168,8 +217,12 @@ async function resendVerification(req, res) {
     );
     if (rows.length > 0) {
       const user = rows[0];
-      await sendVerificationEmail(user.id, user.email, user.first_name);
-      try { await audit.log(user.id, "VERIFICATION_EMAIL_RESENT", "Verification email resent"); } catch {}
+      if (allowTriggeredEmail(user.email)) {
+        await sendVerificationEmail(user.id, user.email, user.first_name);
+        try { await audit.log(user.id, "VERIFICATION_EMAIL_RESENT", "Verification email resent"); } catch {}
+      } else {
+        try { await audit.log(user.id, "VERIFICATION_EMAIL_RATE_LIMITED", "Resend verification throttled"); } catch {}
+      }
     }
   } catch (err) {
     console.error('Resend verification error:', err.message);
@@ -182,6 +235,17 @@ async function login(req, res) {
   const parsed = loginSchema.parse(req.body);
 
   const attempts = failedLoginAttempts.get(parsed.email) || { count: 0 };
+
+  // Reject immediately if the account is currently locked out
+  if (attempts.lockedUntil && attempts.lockedUntil > Date.now()) {
+    const minutesLeft = Math.ceil((attempts.lockedUntil - Date.now()) / 60000);
+    await audit.log(null, "ACCOUNT_LOCKED_ATTEMPT", `Login attempted on locked account: ${parsed.email}`);
+    return res.status(403).json({
+      error: `Account temporarily locked due to repeated failed attempts. Try again in ${minutesLeft} minute(s).`,
+      accountLocked: true
+    });
+  }
+
   const requiresCaptcha = attempts.count >= CAPTCHA_THRESHOLD;
 
   if (requiresCaptcha) {
@@ -203,8 +267,26 @@ async function login(req, res) {
   if (!user) {
     const current = failedLoginAttempts.get(parsed.email) || { count: 0 };
     const newCount = current.count + 1;
-    failedLoginAttempts.set(parsed.email, { count: newCount, lastAttempt: Date.now() });
-    return res.status(401).json({ error: 'Invalid email or password', requiresCaptcha: newCount >= CAPTCHA_THRESHOLD });
+    const updated = { count: newCount, lastAttempt: Date.now() };
+
+    if (newCount >= LOCKOUT_THRESHOLD) {
+      const [roleRows] = await db.execute('SELECT role FROM users WHERE email = ? LIMIT 1', [parsed.email]);
+      const isAdmin = roleRows[0]?.role === 'ADMIN';
+      const lockoutMs = isAdmin ? ADMIN_LOCKOUT_MS : USER_LOCKOUT_MS;
+      updated.lockedUntil = Date.now() + lockoutMs;
+
+      await audit.log(null, "ACCOUNT_LOCKED", `Account ${parsed.email} locked for ${lockoutMs / 60000} minutes after ${newCount} failed attempts`);
+      if (isAdmin) {
+        notifyAdminsOfLockout(parsed.email).catch(err => console.error('notifyAdminsOfLockout failed:', err.message));
+      }
+    }
+
+    failedLoginAttempts.set(parsed.email, updated);
+    return res.status(401).json({
+      error: 'Invalid email or password',
+      requiresCaptcha: newCount >= CAPTCHA_THRESHOLD,
+      accountLocked: !!updated.lockedUntil
+    });
   }
 
   // Block login if the account has been suspended
@@ -264,6 +346,16 @@ async function confirmMfaSetup(req, res) {
 
 async function verifyMfaLogin(req, res) {
   const parsed = mfaLoginVerifySchema.parse(req.body);
+
+  const mfaAttempts = mfaFailedAttempts.get(parsed.userId) || { count: 0 };
+  if (mfaAttempts.cooldownUntil && mfaAttempts.cooldownUntil > Date.now()) {
+    const minutesLeft = Math.ceil((mfaAttempts.cooldownUntil - Date.now()) / 60000);
+    return res.status(429).json({
+      error: `Too many invalid codes. Try again in ${minutesLeft} minute(s).`,
+      cooldownActive: true
+    });
+  }
+
   let ok = await authService.verifyMfaForLogin(parsed.userId, parsed.token);
   let usedRecoveryCode = false;
 
@@ -280,7 +372,18 @@ async function verifyMfaLogin(req, res) {
     }
   }
 
-  if (!ok) return res.status(401).json({ error: "Invalid MFA token" });
+  if (!ok) {
+    const newCount = mfaAttempts.count + 1;
+    const updated = { count: newCount };
+    if (newCount >= MFA_COOLDOWN_THRESHOLD) {
+      updated.cooldownUntil = Date.now() + MFA_COOLDOWN_MS;
+      await audit.log(parsed.userId, "MFA_LOGIN_LOCKED", `MFA cooldown triggered after ${newCount} failed attempts`);
+    }
+    mfaFailedAttempts.set(parsed.userId, updated);
+    return res.status(401).json({ error: "Invalid MFA token" });
+  }
+
+  mfaFailedAttempts.delete(parsed.userId);
 
   const userRow = await authService.getUserRole(parsed.userId);
   if (!userRow) return res.status(404).json({ error: "User not found" });
@@ -507,5 +610,6 @@ module.exports = {
   verifyEmail, resendVerification,
   beginMfaSetup, confirmMfaSetup, verifyMfaLogin, disableMfa,
   getProfile, updateProfile, changeEmail, changePassword,
-  createSupportTicket, getUserTickets, replyToTicket
+  createSupportTicket, getUserTickets, replyToTicket,
+  allowTriggeredEmail
 };

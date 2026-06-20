@@ -1,5 +1,57 @@
 # Changelog
 
+## [0.7.0] - 20/06/2026 - UI redesign and security/vulnerability hardening.
+
+### Added
+
+#### UI Redesign
+- `Sidebar.js` - new left-hand sidebar navigation with role-aware links (user/Premium/Admin), replacing the old top navbar. Collapses to a horizontal bar on mobile
+- `global.css` - new design token system: CSS custom properties for brand colours (navy `#1B3F7A`, green `#3CB54A`), spacing, typography, radius, and shadows. Bootstrap CSS variables overridden so existing `variant="primary"`/`bg="success"` props pick up the brand palette automatically without per-component rewrites
+- DM Sans font now actually loaded via Google Fonts `<link>` in `index.html` (previously referenced in the project proposal but never wired up)
+- `Home.js` - new public landing page at `/` for signed-out visitors: hero section with animated gradient accents, feature cards, "how it works" steps, sticky frosted-glass nav bar. Replaces the previous behaviour of redirecting anonymous visitors straight to `/login` with no landing page at all
+- `frontend/src/utils/format.js` - shared `formatDate`, `formatDateTime`, `formatCurrency`, `getWarrantyStatus`, `getDaysLeft`, `getStatusBadgeVariant`, `downloadBlob` helpers, replacing ~9 duplicated local implementations scattered across Dashboard, ReceiptList, ReceiptDetail, and the admin pages
+- `.auth-shell` / `.auth-card` layout applied consistently across Login, Register, ForgotPassword, ResetPassword, MfaVerify, and VerifyEmail - centered card, branded logo, consistent spacing, replacing the previous plain unstyled forms
+
+#### Account Security
+- Account lockout after 5 failed login attempts - 30 minutes for FREE/PREMIUM accounts, 60 minutes for ADMIN accounts. Logged to `audit_logs` as `ACCOUNT_LOCKED`/`ACCOUNT_LOCKED_ATTEMPT`
+- Email alert sent to every other ADMIN account when an admin account is locked out, via new `emailService.sendAdminLockoutAlert()`
+- Cooldown after 3 failed MFA codes during login - 5 minute lockout (`429` response), logged as `MFA_LOGIN_LOCKED`. Login-time verification only; MFA setup confirmation is unaffected
+- Role-based JWT session expiry - 60 minutes for regular users, 30 minutes for admins (`ADMIN_JWT_EXPIRES_IN`, configurable). Previously a single global expiry applied to everyone
+- `SessionManager.js` - new logic-only component that tracks mouse/keyboard/scroll activity and force-logs-out the user after the matching inactivity window, mounted alongside the sidebar
+- Per-email-address rate limiting (3 per rolling hour) on `resend-verification` and `forgot-password`, to stop those endpoints being used to spam a real victim's inbox now that email delivery is genuinely real
+
+#### Email Delivery (Resend Integration)
+- Real outbound email via the Resend API (`resend` npm package) - registration verification, password reset, admin notifications, ticket replies, and warranty alerts are now actually delivered to real inboxes
+- `emailService.sendEmail({ to, subject, html })` - single shared method all outbound email now goes through, replacing ~8 call sites that each previously built their own Nodemailer/Ethereal transport call directly inside `adminController.js` and `warrantyAlertService.js`
+- `RESEND_API_KEY` and `EMAIL_FROM_ADDRESS` environment variables - both required at startup, no fallback
+
+#### Database & Deployment
+- `backend/database/schema.sql` - consolidated, idempotent database setup script for fresh deployments (AWS RDS or otherwise). Folds the previously scattered `ALTER TABLE` migration fragments into the original `CREATE TABLE` statements, adds missing indexes (`support_tickets(user_id)`, `support_tickets(status)`, `audit_logs(action, created_at)`), and documents a safe optional admin-bootstrap insert
+
+### Changed
+- Every admin-triggered notification email (tier change, suspension, reactivation, password reset, MFA reset, ticket response) now goes through `emailService.sendEmail()` using one configurable "from" address, instead of hardcoded placeholder sender domains (`noreply@whereis.it`, `support@whereis.it`) that could never have passed real provider domain verification
+- `backend/src/routes/receiptRoutes.js` - six manually try/catched route handlers converted to use the existing `asyncHandler` utility, matching the pattern already used in `authRoutes.js`/`adminRoutes.js`
+- One-line explanatory comments added to every function across all touched frontend and backend files
+- Full visual pass across every existing page (auth pages, dashboard, receipts, profile, all admin pages) - replaced inline hardcoded colours and `onMouseEnter`/`onMouseLeave` hover-shadow JS hacks with token-driven CSS classes (`.hover-card`, `.tag-pill`, `.landing-feature-icon`, etc.)
+
+### Fixed
+- **Email enumeration / information leak** - duplicate registration with an already-registered email threw an uncaught MySQL duplicate-key error straight through `errorMiddleware`, which echoed the raw DB error message (including the email address) back to the client in a `500` response. Now caught and returns a clean `409`
+- **Password reset never sent an email in production** - the `forgot-password` handler only called `emailService.sendPasswordResetEmail()` inside an `if (NODE_ENV !== 'production')` block, so in a real deployment no email was ever sent at all, silently. The handler also returned the raw reset token and reset URL directly in the API response as a dev convenience, which leaked the token. Both fixed - the email always sends now, and the token is never returned in the response
+- `Login.js` never read `location.state.message`, so `ResetPassword.js`'s "password reset successful" confirmation banner was silently never displayed after a successful reset. Fixed while wiring up the `SessionManager` inactivity-logout message, which uses the same mechanism
+- Removed a broken `<i className="bi bi-shield-lock">` icon reference in `MfaVerify.js` - Bootstrap Icons was never actually loaded as a project dependency, so the icon never rendered
+
+### Removed
+- Dead/unused frontend pages with no remaining route or import: `Home.js` (old version, superseded), `MfaSetup.js` (duplicate of Profile's MFA tab), `Admin.js` (superseded by `AdminAuditLogs.js`), `Receipts.js` (superseded by `ReceiptList.js`), `UploadReceipt.js` (superseded by `ReceiptUpload.js`/`ReceiptManual.js`) - roughly 1,200 lines of dead code
+- `Navbar.js` - replaced by `Sidebar.js`
+- Ethereal/Nodemailer email sandbox entirely - Resend is now the only email path, with no local/fake fallback. `nodemailer` removed from `package.json` as it is no longer referenced anywhere
+- All "Open Email Preview" buttons and `previewUrl` response fields across `adminController.js`, `premiumController.js`, `warrantyAlertService.js`, and the corresponding frontend pages (`AdminUserDetail.js`, `AdminSupportTickets.js`, `Profile.js`) - dead now that real email delivery has no preview link to show
+- Redundant `idx_email` index in the `users` table schema - the existing `UNIQUE` constraint on `email` already creates one
+
+### Security
+- `npm audit` review confirmed the new `resend` dependency introduces zero new vulnerabilities. Removing `nodemailer` eliminated one pre-existing high-severity CVE (CRLF header injection / SSRF via the `raw` option) from the dependency tree outright - 8 pre-existing vulnerabilities down to 7, none newly introduced
+- `backend/database/schema.sql` AWS RDS deployment review - fixed a database-name typo in the documented optional `GRANT` statement, corrected `@'localhost'` (which cannot work against a remote RDS host) to `@'%'`, and replaced no-op admin/premium role `UPDATE` statements (which silently affect 0 rows against a fresh database with no users yet) with a documented, safe bootstrap-admin option
+- Audited the project's technical report use cases (account lockout thresholds, MFA cooldown, session timeout durations, email-enumeration protection) against the actual implementation and closed every gap found - see Added/Fixed above
+
 ## [0.6.0] - 18/06/2026 - Completed Admin use case.
  
 ### Added

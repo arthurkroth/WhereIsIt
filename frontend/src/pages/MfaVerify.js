@@ -5,10 +5,11 @@
  */
 
 import React, { useState, useEffect } from 'react';
-import { useNavigate, useLocation } from 'react-router-dom';
-import { Container, Card, Form, Button, Alert, Spinner } from 'react-bootstrap';
+import { useNavigate, useLocation, Link } from 'react-router-dom';
+import { Card, Form, Button, Alert, Spinner } from 'react-bootstrap';
 import { verifyMfaLogin } from '../services/api';
 import { useAuth } from '../context/AuthContext';
+import logoIcon from '../assets/logo-icon.svg';
 
 /**
  * MFA Verification Page
@@ -110,17 +111,16 @@ function MfaVerify() {
   };
 
   return (
-    <Container className="mt-5">
-      <div className="row justify-content-center">
-        <div className="col-md-6 col-lg-4">
-          <Card>
-            <Card.Header className="bg-primary text-white">
-              <h4 className="mb-0">
-                <i className="bi bi-shield-lock me-2"></i>
-                Two-Factor Authentication
-              </h4>
-            </Card.Header>
-            <Card.Body>
+    <div className="auth-shell">
+      <div className="auth-card-wrap">
+        <Link to="/">
+          <img src={logoIcon} alt="WhereIsIt?" className="auth-logo" />
+        </Link>
+        <Card className="auth-card">
+          <Card.Header className="bg-primary text-white">
+            <h4 className="mb-0">Two-Factor Authentication</h4>
+          </Card.Header>
+          <Card.Body>
               {error && (
                 <Alert variant="danger" onClose={() => setError('')} dismissible>
                   {error}
@@ -195,11 +195,10 @@ function MfaVerify() {
                   </small>
                 </Alert>
               </div>
-            </Card.Body>
-          </Card>
-        </div>
+          </Card.Body>
+        </Card>
       </div>
-    </Container>
+    </div>
   );
 }
 

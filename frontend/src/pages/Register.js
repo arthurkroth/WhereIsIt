@@ -5,9 +5,10 @@
  */
 
 import React, { useState } from 'react';
-import { Container, Row, Col, Card, Form, Button, Alert, Spinner, ProgressBar } from 'react-bootstrap';
+import { Row, Col, Card, Form, Button, Alert, Spinner, ProgressBar } from 'react-bootstrap';
 import { useNavigate, Link } from 'react-router-dom';
 import { register } from '../services/api';
+import logoIcon from '../assets/logo-icon.svg';
 
 /**
  * Registration page component.
@@ -69,6 +70,7 @@ const Register = () => {
   const passwordEval = evaluatePassword(password);
   const strengthDisplay = getStrengthDisplay(passwordEval.score);
 
+  // Checks whether a string is a plausible email address.
   const isValidEmail = (email) => /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email);
 
   /**
@@ -125,12 +127,15 @@ const Register = () => {
   };
 
   return (
-    <Container className="main-container">
-      <Row className="justify-content-center">
-        <Col md={7} lg={6}>
-          <Card>
-            <Card.Body>
-              <h2 className="text-center mb-4">Register for WhereIsIt?</h2>
+    <div className="auth-shell">
+      <div className="auth-card-wrap auth-card-wrap--wide">
+        <Link to="/">
+          <img src={logoIcon} alt="WhereIsIt?" className="auth-logo" />
+        </Link>
+        <Card className="auth-card">
+          <Card.Body className="p-4 p-md-5">
+              <h2 className="text-center mb-1 fw-bold">Create your account</h2>
+              <p className="text-center text-secondary mb-4">Free to get started — upgrade any time</p>
 
               {error && (
                 <Alert variant="danger" dismissible onClose={() => setError('')}>{error}</Alert>
@@ -277,11 +282,13 @@ const Register = () => {
                 </>
               )}
 
-            </Card.Body>
-          </Card>
-        </Col>
-      </Row>
-    </Container>
+          </Card.Body>
+        </Card>
+        <p className="auth-footer-link">
+          <Link to="/">Back to home</Link>
+        </p>
+      </div>
+    </div>
   );
 };
 

@@ -10,9 +10,11 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 
 import ProtectedRoute from './components/ProtectedRoute';
 import AdminRoute from './components/AdminRoute';
-import Navbar from './components/Navbar';
+import Sidebar from './components/Sidebar';
+import SessionManager from './components/SessionManager';
 
 // Public pages
+import Home from './pages/Home';
 import Login from './pages/Login';
 import Register from './pages/Register';
 import ForgotPassword from './pages/ForgotPassword';
@@ -38,31 +40,36 @@ import AdminSupportTickets from './pages/AdminSupportTickets';
 import AdminAuditLogs from './pages/AdminAuditLogs';
 import AdminReports from './pages/AdminReports';
 
-/**
- * HomeRedirect — sends admins to /admin/dashboard, everyone else to /dashboard.
- */
-function HomeRedirect() {
+// Shows the public landing page to signed-out visitors; redirects signed-in
+// users straight to their dashboard (admins to /admin/dashboard).
+function HomeRoute() {
   const { user } = useAuth();
-  if (user?.role === 'ADMIN') return <Navigate to="/admin/dashboard" replace />;
+  if (!user) return <Home />;
+  if (user.role === 'ADMIN') return <Navigate to="/admin/dashboard" replace />;
   return <Navigate to="/dashboard" replace />;
 }
 
-/**
- * DashboardRoute — redirects admins away from the user dashboard.
- */
+// Redirects any unknown URL to the home route above.
+function NotFoundRedirect() {
+  return <Navigate to="/" replace />;
+}
+
+// Redirects admins away from the user dashboard.
 function DashboardRoute() {
   const { user } = useAuth();
   if (user?.role === 'ADMIN') return <Navigate to="/admin/dashboard" replace />;
   return <ProtectedRoute><Dashboard /></ProtectedRoute>;
 }
 
+// Renders the sidebar (when logged in) plus the routed page content.
 function AppContent() {
   const { user } = useAuth();
 
   return (
-    <>
-      {user && <Navbar />}
-      <div style={{ paddingTop: user ? '1.5rem' : '0' }}>
+    <div className={user ? 'app-layout' : ''}>
+      {user && <Sidebar />}
+      {user && <SessionManager />}
+      <div className={user ? 'app-main' : ''}>
         <Routes>
           {/* Public routes */}
           <Route path="/login"           element={<Login />} />
@@ -92,15 +99,16 @@ function AppContent() {
           <Route path="/admin/audit-logs" element={<AdminRoute><AdminAuditLogs /></AdminRoute>} />
           <Route path="/admin/reports"    element={<AdminRoute><AdminReports /></AdminRoute>} />
 
-          {/* Default redirects */}
-          <Route path="/"  element={<HomeRedirect />} />
-          <Route path="*"  element={<HomeRedirect />} />
+          {/* Landing page + fallback */}
+          <Route path="/"  element={<HomeRoute />} />
+          <Route path="*"  element={<NotFoundRedirect />} />
         </Routes>
       </div>
-    </>
+    </div>
   );
 }
 
+// Root component: wraps the router and auth context around the whole app.
 function App() {
   return (
     <AuthProvider>

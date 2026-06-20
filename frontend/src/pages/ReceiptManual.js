@@ -27,12 +27,14 @@ function ReceiptManual() {
   const [error, setError] = useState('');
   const [success, setSuccess] = useState(false);
 
+  // Updates a single header field and clears its validation error, if any.
   const handleHeaderChange = (e) => {
     const { name, value } = e.target;
     setHeader(prev => ({ ...prev, [name]: value }));
     if (errors[name]) setErrors(prev => ({ ...prev, [name]: '' }));
   };
 
+  // Updates a single field on one line item and clears its validation error, if any.
   const handleItemChange = (index, field, value) => {
     setItems(prev => {
       const updated = [...prev];
@@ -43,16 +45,20 @@ function ReceiptManual() {
     if (errors[errorKey]) setErrors(prev => ({ ...prev, [errorKey]: '' }));
   };
 
+  // Appends a blank line item to the form.
   const handleAddItem = () => setItems(prev => [...prev, { productDescription: '', price: '', warrantyMonths: '12' }]);
 
+  // Removes a line item, keeping at least one.
   const handleRemoveItem = (index) => {
     if (items.length === 1) return;
     setItems(prev => prev.filter((_, i) => i !== index));
   };
 
+  // Sums the price of every line item to derive the receipt total.
   const calculateTotal = () =>
     items.reduce((sum, item) => { const p = parseFloat(item.price); return sum + (isNaN(p) ? 0 : p); }, 0);
 
+  // Computes a human-readable warranty expiry date for display under each item.
   const calculateWarrantyExpiry = (purchaseDate, warrantyMonths) => {
     if (!purchaseDate || !warrantyMonths) return null;
     const date = new Date(purchaseDate);
@@ -62,6 +68,7 @@ function ReceiptManual() {
     return date.toLocaleDateString('en-GB', { year: 'numeric', month: 'long', day: 'numeric' });
   };
 
+  // Validates the header and every line item, populating the errors map.
   const validateForm = () => {
     const newErrors = {};
     if (!header.storeName.trim()) newErrors.storeName = 'Store name is required';
@@ -84,6 +91,7 @@ function ReceiptManual() {
     return Object.keys(newErrors).length === 0;
   };
 
+  // Validates the form, then submits the manual receipt to the backend.
   const handleSubmit = async (e) => {
     e.preventDefault();
     if (!validateForm()) return;
@@ -117,6 +125,7 @@ function ReceiptManual() {
     }
   };
 
+  // Clears the entire form back to its initial blank state.
   const handleReset = () => {
     setHeader({ storeName: '', purchaseDate: '', warrantyMonths: '12' });
     setItems([{ productDescription: '', price: '', warrantyMonths: '12' }]);

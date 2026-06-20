@@ -13,7 +13,9 @@ import {
   Alert, Spinner, Button, Table
 } from 'react-bootstrap';
 import { getAdminStats } from '../services/api';
+import { formatDateTime } from '../utils/format';
 
+// Admin landing page: system stats, navigation cards, and recent admin actions.
 function AdminDashboard() {
   const navigate = useNavigate();
   const [stats, setStats] = useState(null);
@@ -21,8 +23,10 @@ function AdminDashboard() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
 
+  // Loads dashboard stats on mount.
   useEffect(() => { fetchStats(); }, []);
 
+  // Fetches system-wide stats and the most recent admin actions.
   const fetchStats = async () => {
     setLoading(true); setError('');
     try {
@@ -36,14 +40,7 @@ function AdminDashboard() {
     }
   };
 
-  const formatDate = (ts) => {
-    if (!ts) return '—';
-    return new Date(ts).toLocaleString('en-GB', {
-      day: '2-digit', month: 'short', year: 'numeric',
-      hour: '2-digit', minute: '2-digit'
-    });
-  };
-
+  // Maps an audit log action to a Bootstrap badge colour.
   const getActionBadgeVariant = (action) => {
     if (!action) return 'secondary';
     if (action.includes('SUSPEND') || action.includes('MFA_RESET')) return 'danger';
@@ -126,10 +123,7 @@ function AdminDashboard() {
           {/* Navigation cards — now includes Reports */}
           <Row className="g-3 mb-4">
             <Col md={3}>
-              <Card className="h-100" style={{ cursor: 'pointer' }}
-                onClick={() => navigate('/admin/users')}
-                onMouseEnter={e => e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.1)'}
-                onMouseLeave={e => e.currentTarget.style.boxShadow = 'none'}>
+              <Card className="h-100 hover-card" onClick={() => navigate('/admin/users')}>
                 <Card.Body className="text-center py-4">
                   <div style={{ fontSize: '2.5rem' }}>👥</div>
                   <h5 className="mt-2 mb-1">Search Users</h5>
@@ -138,10 +132,7 @@ function AdminDashboard() {
               </Card>
             </Col>
             <Col md={3}>
-              <Card className="h-100" style={{ cursor: 'pointer' }}
-                onClick={() => navigate('/admin/tickets')}
-                onMouseEnter={e => e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.1)'}
-                onMouseLeave={e => e.currentTarget.style.boxShadow = 'none'}>
+              <Card className="h-100 hover-card" onClick={() => navigate('/admin/tickets')}>
                 <Card.Body className="text-center py-4">
                   <div style={{ fontSize: '2.5rem' }}>🎫</div>
                   <h5 className="mt-2 mb-1">Support Tickets</h5>
@@ -154,10 +145,7 @@ function AdminDashboard() {
               </Card>
             </Col>
             <Col md={3}>
-              <Card className="h-100" style={{ cursor: 'pointer' }}
-                onClick={() => navigate('/admin/audit-logs')}
-                onMouseEnter={e => e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.1)'}
-                onMouseLeave={e => e.currentTarget.style.boxShadow = 'none'}>
+              <Card className="h-100 hover-card" onClick={() => navigate('/admin/audit-logs')}>
                 <Card.Body className="text-center py-4">
                   <div style={{ fontSize: '2.5rem' }}>📋</div>
                   <h5 className="mt-2 mb-1">Audit Logs</h5>
@@ -166,10 +154,7 @@ function AdminDashboard() {
               </Card>
             </Col>
             <Col md={3}>
-              <Card className="h-100" style={{ cursor: 'pointer' }}
-                onClick={() => navigate('/admin/reports')}
-                onMouseEnter={e => e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.1)'}
-                onMouseLeave={e => e.currentTarget.style.boxShadow = 'none'}>
+              <Card className="h-100 hover-card" onClick={() => navigate('/admin/reports')}>
                 <Card.Body className="text-center py-4">
                   <div style={{ fontSize: '2.5rem' }}>📄</div>
                   <h5 className="mt-2 mb-1">Reports</h5>
@@ -212,7 +197,7 @@ function AdminDashboard() {
                             {action.details?.substring(0, 80)}{action.details?.length > 80 ? '…' : ''}
                           </small>
                         </td>
-                        <td><small className="text-muted">{formatDate(action.created_at)}</small></td>
+                        <td><small className="text-muted">{formatDateTime(action.created_at)}</small></td>
                       </tr>
                     ))}
                   </tbody>

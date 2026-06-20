@@ -26,10 +26,7 @@ export const PREDEFINED_TAGS = [
  * @param {boolean} disabled - Disables all interaction when true
  */
 function TagSelector({ selectedTags = [], onChange, disabled = false }) {
-  /**
-   * Toggles a tag in/out of the selected array.
-   * @param {string} tag - Tag to toggle
-   */
+  // Toggles a tag in/out of the selected array.
   const toggleTag = (tag) => {
     if (disabled) return;
     const updated = selectedTags.includes(tag)
@@ -46,17 +43,7 @@ function TagSelector({ selectedTags = [], onChange, disabled = false }) {
           type="button"
           onClick={() => toggleTag(tag)}
           disabled={disabled}
-          style={{
-            padding: '4px 12px',
-            borderRadius: '20px',
-            border: '1px solid',
-            cursor: disabled ? 'default' : 'pointer',
-            fontSize: '0.85rem',
-            transition: 'all 0.15s ease',
-            backgroundColor: selectedTags.includes(tag) ? '#0d6efd' : 'transparent',
-            borderColor: selectedTags.includes(tag) ? '#0d6efd' : '#adb5bd',
-            color: selectedTags.includes(tag) ? '#ffffff' : '#6c757d'
-          }}
+          className={`tag-pill${selectedTags.includes(tag) ? ' tag-pill--active' : ''}`}
         >
           {tag}
         </button>

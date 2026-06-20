@@ -131,11 +131,11 @@ async function changeTier(req, res) {
   if (oldTier === newTier) return res.status(400).json({ error: `User is already on the ${newTier} tier` });
   await db.execute('UPDATE users SET role = ? WHERE id = ?', [newTier, id]);
   try {
-    const transporter = await emailService.getTransporter();
-    const nodemailer = require('nodemailer');
-    const info = await transporter.sendMail({ from: '"WhereIsIt?" <noreply@whereis.it>', to: user.email, subject: `Your WhereIsIt? account has been updated to ${newTier}`, html: `<p>Hi ${user.first_name}, your account tier has been changed from <strong>${oldTier}</strong> to <strong>${newTier}</strong>.</p>` });
-    const preview = nodemailer.getTestMessageUrl(info);
-    if (preview) console.log(`📧 Tier change email: ${preview}`);
+    await emailService.sendEmail({
+      to: user.email,
+      subject: `Your WhereIsIt? account has been updated to ${newTier}`,
+      html: `<p>Hi ${user.first_name}, your account tier has been changed from <strong>${oldTier}</strong> to <strong>${newTier}</strong>.</p>`
+    });
   } catch (err) { console.error('Failed to send tier change email:', err.message); }
   await db.execute("INSERT INTO audit_logs (user_id, action, details, ip_address) VALUES (?, ?, ?, ?)", [adminId, 'ADMIN_TIER_CHANGE', `Admin changed user ${id} (${user.email}) from ${oldTier} to ${newTier}. Reason: ${reason.trim()}`, req.ip]);
   return res.json({ success: true, message: `User tier changed from ${oldTier} to ${newTier}` });
@@ -154,11 +154,11 @@ async function suspendAccount(req, res) {
   if (user.role === 'ADMIN') return res.status(400).json({ error: 'Administrator accounts cannot be suspended' });
   await db.execute('UPDATE users SET status = ? WHERE id = ?', ['suspended', id]);
   try {
-    const transporter = await emailService.getTransporter();
-    const nodemailer = require('nodemailer');
-    const info = await transporter.sendMail({ from: '"WhereIsIt?" <noreply@whereis.it>', to: user.email, subject: 'Your WhereIsIt? account has been suspended', html: `<p>Hi ${user.first_name}, your account has been suspended. Please contact support.</p>` });
-    const preview = nodemailer.getTestMessageUrl(info);
-    if (preview) console.log(`📧 Suspension email: ${preview}`);
+    await emailService.sendEmail({
+      to: user.email,
+      subject: 'Your WhereIsIt? account has been suspended',
+      html: `<p>Hi ${user.first_name}, your account has been suspended. Please contact support.</p>`
+    });
   } catch (err) { console.error('Failed to send suspension email:', err.message); }
   await db.execute("INSERT INTO audit_logs (user_id, action, details, ip_address) VALUES (?, ?, ?, ?)", [adminId, 'ADMIN_ACCOUNT_SUSPENDED', `Admin suspended user ${id} (${user.email}). Reason: ${reason.trim()}`, req.ip]);
   return res.json({ success: true, message: 'Account suspended successfully' });
@@ -175,11 +175,11 @@ async function reactivateAccount(req, res) {
   if (user.status !== 'suspended') return res.status(400).json({ error: 'Account is not currently suspended' });
   await db.execute('UPDATE users SET status = ? WHERE id = ?', ['active', id]);
   try {
-    const transporter = await emailService.getTransporter();
-    const nodemailer = require('nodemailer');
-    const info = await transporter.sendMail({ from: '"WhereIsIt?" <noreply@whereis.it>', to: user.email, subject: 'Your WhereIsIt? account has been reactivated', html: `<p>Hi ${user.first_name}, your account has been reactivated. You can now log in.</p>` });
-    const preview = nodemailer.getTestMessageUrl(info);
-    if (preview) console.log(`📧 Reactivation email: ${preview}`);
+    await emailService.sendEmail({
+      to: user.email,
+      subject: 'Your WhereIsIt? account has been reactivated',
+      html: `<p>Hi ${user.first_name}, your account has been reactivated. You can now log in.</p>`
+    });
   } catch (err) { console.error('Failed to send reactivation email:', err.message); }
   await db.execute("INSERT INTO audit_logs (user_id, action, details, ip_address) VALUES (?, ?, ?, ?)", [adminId, 'ADMIN_ACCOUNT_REACTIVATED', `Admin reactivated user ${id} (${user.email}). Reason: ${reason.trim()}`, req.ip]);
   return res.json({ success: true, message: 'Account reactivated successfully' });
@@ -197,17 +197,16 @@ async function adminResetPassword(req, res) {
   const hashedToken = crypto.createHash('sha256').update(plainToken).digest('hex');
   const expiresAt = new Date(Date.now() + 24 * 60 * 60 * 1000);
   await db.execute('UPDATE users SET password_reset_token = ?, password_reset_expires = ? WHERE id = ?', [hashedToken, expiresAt, id]);
-  let previewUrl = null;
   try {
-    const transporter = await emailService.getTransporter();
-    const nodemailer = require('nodemailer');
     const resetUrl = `${process.env.APP_BASE_URL}/reset-password?token=${plainToken}`;
-    const info = await transporter.sendMail({ from: '"WhereIsIt?" <noreply@whereis.it>', to: user.email, subject: 'Password reset for your WhereIsIt? account', html: `<p>Hi ${user.first_name}, an admin has triggered a password reset. <a href="${resetUrl}">Reset your password</a> (expires in 24 hours).</p>` });
-    previewUrl = nodemailer.getTestMessageUrl(info);
-    if (previewUrl) console.log(`📧 Admin password reset email: ${previewUrl}`);
+    await emailService.sendEmail({
+      to: user.email,
+      subject: 'Password reset for your WhereIsIt? account',
+      html: `<p>Hi ${user.first_name}, an admin has triggered a password reset. <a href="${resetUrl}">Reset your password</a> (expires in 24 hours).</p>`
+    });
   } catch (err) { console.error('Failed to send reset email:', err.message); }
   await db.execute("INSERT INTO audit_logs (user_id, action, details, ip_address) VALUES (?, ?, ?, ?)", [adminId, 'ADMIN_PASSWORD_RESET', `Admin initiated password reset for user ${id} (${user.email}). Reason: ${reason.trim()}`, req.ip]);
-  return res.json({ success: true, message: 'Password reset link sent to user', previewUrl });
+  return res.json({ success: true, message: 'Password reset link sent to user' });
 }
 
 async function adminResetMfa(req, res) {
@@ -226,16 +225,15 @@ async function adminResetMfa(req, res) {
   const mfaWasEnabled = user.mfa_enabled === 1 || user.mfa_enabled === true;
   await db.execute('UPDATE users SET mfa_enabled = FALSE, mfa_secret = NULL WHERE id = ?', [id]);
   await db.execute('DELETE FROM mfa_recovery_codes WHERE user_id = ?', [id]);
-  let previewUrl = null;
   try {
-    const transporter = await emailService.getTransporter();
-    const nodemailer = require('nodemailer');
-    const info = await transporter.sendMail({ from: '"WhereIsIt?" <noreply@whereis.it>', to: user.email, subject: '⚠ Security Alert: MFA has been reset on your account', html: `<p>Hi ${user.first_name}, <strong>MFA has been disabled on your account by an administrator.</strong> If you did not request this, contact support immediately.</p>` });
-    previewUrl = nodemailer.getTestMessageUrl(info);
-    if (previewUrl) console.log(`📧 MFA reset alert: ${previewUrl}`);
+    await emailService.sendEmail({
+      to: user.email,
+      subject: '⚠ Security Alert: MFA has been reset on your account',
+      html: `<p>Hi ${user.first_name}, <strong>MFA has been disabled on your account by an administrator.</strong> If you did not request this, contact support immediately.</p>`
+    });
   } catch (err) { console.error('Failed to send MFA reset notification:', err.message); }
   await db.execute("INSERT INTO audit_logs (user_id, action, details, ip_address) VALUES (?, ?, ?, ?)", [adminId, 'ADMIN_MFA_RESET', `SECURITY: Admin reset MFA for user ${id} (${user.email}). MFA was ${mfaWasEnabled ? 'enabled' : 'disabled'}. Justification: ${justification.trim()}`, req.ip]);
-  return res.json({ success: true, message: 'MFA has been reset. User has been notified.', previewUrl });
+  return res.json({ success: true, message: 'MFA has been reset. User has been notified.' });
 }
 
 // ============================================================================
@@ -275,18 +273,17 @@ async function updateTicket(req, res) {
   if (updates.length === 0) return res.status(400).json({ error: 'No fields to update' });
   params.push(id);
   await db.execute(`UPDATE support_tickets SET ${updates.join(', ')} WHERE id = ?`, params);
-  let previewUrl = null;
   if (response) {
     try {
-      const transporter = await emailService.getTransporter();
-      const nodemailer = require('nodemailer');
-      const info = await transporter.sendMail({ from: '"WhereIsIt? Support" <support@whereis.it>', to: ticket.email, subject: `Re: ${ticket.subject} [Ticket #${id}]`, html: `<p>Hi ${ticket.first_name},</p><blockquote>${response.trim()}</blockquote><p>Status: <strong>${status || ticket.status}</strong></p>` });
-      previewUrl = nodemailer.getTestMessageUrl(info);
-      if (previewUrl) console.log(`📧 Ticket response email: ${previewUrl}`);
+      await emailService.sendEmail({
+        to: ticket.email,
+        subject: `Re: ${ticket.subject} [Ticket #${id}]`,
+        html: `<p>Hi ${ticket.first_name},</p><blockquote>${response.trim()}</blockquote><p>Status: <strong>${status || ticket.status}</strong></p>`
+      });
     } catch (err) { console.error('Failed to send ticket response email:', err.message); }
   }
   await db.execute("INSERT INTO audit_logs (user_id, action, details, ip_address) VALUES (?, ?, ?, ?)", [adminId, 'ADMIN_TICKET_UPDATED', `Admin updated ticket #${id}. Status: ${status || 'unchanged'}`, req.ip]);
-  return res.json({ success: true, message: 'Ticket updated successfully', previewUrl });
+  return res.json({ success: true, message: 'Ticket updated successfully' });
 }
 
 async function createTicket(req, res) {

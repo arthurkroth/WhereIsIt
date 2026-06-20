@@ -13,12 +13,9 @@ import {
 import { getReceiptById, getReceiptFileUrl } from '../services/api';
 import api from '../services/api';
 import TagSelector from '../components/TagSelector';
+import { formatDate, getStatusBadgeVariant } from '../utils/format';
 
-/**
- * ReceiptDetail Page
- * Shows full details of a single receipt, including items, notes, and tags.
- * Allows inline editing and deletion.
- */
+// Shows full details of a single receipt, including items, notes, and tags. Supports inline editing and deletion.
 function ReceiptDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -37,6 +34,7 @@ function ReceiptDetail() {
   const [editNotes, setEditNotes] = useState('');
   const [editTags, setEditTags] = useState([]);
 
+  // Loads the receipt whenever the route's :id param changes.
   useEffect(() => { fetchReceipt(); }, [id]);
 
   // Auto-recalculate total when items change in edit mode
@@ -49,6 +47,7 @@ function ReceiptDetail() {
     setEditHeader(prev => ({ ...prev, totalPrice: total.toFixed(2) }));
   }, [editItems, editing]);
 
+  // Downloads the attached receipt file as a blob for in-page preview.
   useEffect(() => {
     if (!receipt?.hasFile) return;
     const fetchFile = async () => {
@@ -67,6 +66,7 @@ function ReceiptDetail() {
     return () => { if (fileUrl) URL.revokeObjectURL(fileUrl); };
   }, [receipt]);
 
+  // Fetches the receipt's full details and pre-fills the edit form state.
   const fetchReceipt = async () => {
     setLoading(true);
     setError('');
@@ -93,13 +93,18 @@ function ReceiptDetail() {
     }
   };
 
+  // Updates a single field on the receipt header form.
   const handleHeaderChange = (field, value) => setEditHeader(prev => ({ ...prev, [field]: value }));
+  // Updates a single field on one line item.
   const handleItemChange = (index, field, value) => {
     setEditItems(prev => { const u = [...prev]; u[index] = { ...u[index], [field]: value }; return u; });
   };
+  // Appends a blank line item to the edit form.
   const handleAddItem = () => setEditItems(prev => [...prev, { productDescription: '', price: '', warrantyMonths: 12 }]);
+  // Removes a line item, keeping at least one.
   const handleRemoveItem = (index) => { if (editItems.length > 1) setEditItems(prev => prev.filter((_, i) => i !== index)); };
 
+  // Saves the edited receipt header, items, notes, and tags to the backend.
   const handleSave = async () => {
     setSaving(true);
     setError('');
@@ -126,6 +131,7 @@ function ReceiptDetail() {
     }
   };
 
+  // Deletes the receipt and its file, then returns to the receipt list.
   const handleDelete = async () => {
     setDeleting(true);
     try {
@@ -138,20 +144,7 @@ function ReceiptDetail() {
     }
   };
 
-  const getStatusBadgeVariant = (status) => {
-    if (status === 'active') return 'success';
-    if (status === 'expiring_soon') return 'warning';
-    if (status === 'expired') return 'danger';
-    return 'secondary';
-  };
-
-  const formatDate = (dateString) => {
-    if (!dateString) return 'N/A';
-    const date = new Date(dateString);
-    if (isNaN(date.getTime())) return 'N/A';
-    return date.toLocaleDateString('en-GB', { year: 'numeric', month: 'long', day: 'numeric' });
-  };
-
+  // Checks whether the attached receipt file is a PDF (vs an image).
   const isPdf = () => receipt?.fileName?.toLowerCase().endsWith('.pdf');
 
   if (loading) return (

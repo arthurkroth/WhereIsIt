@@ -10,6 +10,7 @@ import { useAuth } from '../context/AuthContext';
 import { Spinner, Container } from 'react-bootstrap';
 
 
+// Gates a route behind authentication, and optionally a set of allowed roles.
 const ProtectedRoute = ({ children, requiredRoles = null }) => {
   const { user, loading, isAuthenticated, hasAnyRole } = useAuth();
 

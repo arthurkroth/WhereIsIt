@@ -1,11 +1,10 @@
 /**
- * Main Dashboard page showing receipt summary, warranty status, and storage usage.
- * Premium users see unlimited storage badge and can export receipts as CSV.
+ * File: Dashboard.js
  * Author: Arthur Kroth - x22166971
  * WhereIsIt Project
  *
  * KEY CHANGES:
- * - Premium users see "Premium — Unlimited Storage" badge instead of progress bar
+ * - Premium users see "Premium - Unlimited Storage" badge instead of progress bar
  * - Export CSV button shown for Premium users
  * - CSV download handled via blob URL to trigger browser download
  */
@@ -18,7 +17,12 @@ import {
 } from 'react-bootstrap';
 import { listReceipts, exportReceiptsCsv } from '../services/api';
 import { useAuth } from '../context/AuthContext';
+import {
+  formatDate, formatCurrency, getWarrantyStatus,
+  getDaysLeft, getStatusBadgeVariant, downloadBlob
+} from '../utils/format';
 
+// Main dashboard page: shows receipt summary stats, storage usage, and recent receipts.
 function Dashboard() {
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -32,8 +36,10 @@ function Dashboard() {
 
   const isPremium = user?.role === 'PREMIUM';
 
+  // Loads the user's receipts and storage info on mount.
   useEffect(() => { fetchReceipts(); }, []);
 
+  // Fetches the receipt list and storage usage info from the backend.
   const fetchReceipts = async () => {
     setLoading(true); setError('');
     try {
@@ -56,49 +62,12 @@ function Dashboard() {
     try {
       const response = await exportReceiptsCsv();
       const blob = new Blob([response.data], { type: 'text/csv;charset=utf-8;' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.setAttribute('download', `WhereIsIt_Receipts_${new Date().toISOString().split('T')[0]}.csv`);
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
+      downloadBlob(blob, `WhereIsIt_Receipts_${new Date().toISOString().split('T')[0]}.csv`);
     } catch (err) {
       setExportError(err.response?.data?.error || 'Failed to export receipts');
     } finally {
       setExportLoading(false);
     }
-  };
-
-  const getWarrantyStatus = (expiryDate) => {
-    const today = new Date();
-    const expiry = new Date(expiryDate);
-    const daysLeft = Math.ceil((expiry - today) / (1000 * 60 * 60 * 24));
-    if (daysLeft < 0) return 'Expired';
-    if (daysLeft <= 30) return 'Expiring Soon';
-    return 'Active';
-  };
-
-  const getDaysLeft = (expiryDate) => Math.ceil((new Date(expiryDate) - new Date()) / (1000 * 60 * 60 * 24));
-
-  const getStatusBadgeVariant = (status) => {
-    if (status === 'Active') return 'success';
-    if (status === 'Expiring Soon') return 'warning';
-    if (status === 'Expired') return 'danger';
-    return 'secondary';
-  };
-
-  const formatDate = (dateString) => {
-    if (!dateString) return 'N/A';
-    const date = new Date(dateString);
-    return isNaN(date.getTime()) ? 'N/A'
-      : date.toLocaleDateString('en-GB', { year: 'numeric', month: 'short', day: 'numeric' });
-  };
-
-  const formatCurrency = (amount) => {
-    const parsed = parseFloat(amount);
-    return isNaN(parsed) ? '€0.00' : `€${parsed.toFixed(2)}`;
   };
 
   const activeCount = receipts.filter(r => getWarrantyStatus(r.warrantyExpiry) === 'Active').length;
@@ -114,6 +83,7 @@ function Dashboard() {
     .sort((a, b) => new Date(b.createdAt) - new Date(a.createdAt))
     .slice(0, 5);
 
+  // Picks a progress bar colour based on how full storage is.
   const getStorageBarVariant = (used, limit) => {
     const pct = (used / limit) * 100;
     if (pct >= 90) return 'danger';
@@ -136,7 +106,7 @@ function Dashboard() {
       <div className="d-flex justify-content-between align-items-center mb-4">
         <h2 className="mb-0">Welcome back, {firstName}!</h2>
         <div className="d-flex gap-2">
-          {/* CSV Export button — Premium only */}
+          {/* CSV Export button - Premium only */}
           {isPremium && (
             <Button
               variant="outline-warning"
@@ -190,7 +160,7 @@ function Dashboard() {
           <Card.Body className="d-flex justify-content-between align-items-center py-2">
             <div className="d-flex align-items-center gap-2">
               <span className="text-warning fs-5">★</span>
-              <strong>Premium — Unlimited Storage</strong>
+              <strong>Premium - Unlimited Storage</strong>
               <span className="text-muted small">({storageInfo.used} receipt{storageInfo.used !== 1 ? 's' : ''} stored)</span>
             </div>
             <Badge bg="warning" text="dark">Premium</Badge>
@@ -270,10 +240,7 @@ function Dashboard() {
                 const daysLeft = getDaysLeft(receipt.warrantyExpiry);
                 return (
                   <Col key={receipt.id} xs={12} md={6} lg={4}>
-                    <Card className="h-100" onClick={() => navigate(`/receipts/${receipt.id}`)}
-                      style={{ cursor: 'pointer' }}
-                      onMouseEnter={e => e.currentTarget.style.boxShadow = '0 4px 12px rgba(0,0,0,0.1)'}
-                      onMouseLeave={e => e.currentTarget.style.boxShadow = 'none'}>
+                    <Card className="h-100 hover-card" onClick={() => navigate(`/receipts/${receipt.id}`)}>
                       <Card.Body>
                         <div className="d-flex justify-content-between align-items-center mb-1">
                           <Card.Title className="fs-6 mb-0 text-truncate me-2">{receipt.storeName}</Card.Title>

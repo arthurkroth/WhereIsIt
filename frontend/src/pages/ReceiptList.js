@@ -1,8 +1,5 @@
 /**
- * Receipt List Page
- * Displays a list of user receipts with search, sorting, and filtering capabilities.
- * Premium users have access to advanced filters and can export their receipts as CSV.
- * Free users see an upgrade prompt for premium features in the filter panel.
+ * File: ReceiptList.js
  * Author: Arthur Kroth - x22166971
  * WhereIsIt Project
  *
@@ -11,7 +8,6 @@
  * - Premium-exclusive advanced filters: warranty expiring within X days,
  *   price category brackets, file type filter
  * - Export CSV button for Premium users
- * - Free users see an upgrade prompt in the advanced filter panel
  */
 
 import React, { useState, useEffect } from 'react';
@@ -22,7 +18,12 @@ import {
 } from 'react-bootstrap';
 import { listReceipts, exportReceiptsCsv } from '../services/api';
 import { useAuth } from '../context/AuthContext';
+import {
+  formatDate, formatCurrency, getWarrantyStatus,
+  getStatusBadgeVariant, downloadBlob
+} from '../utils/format';
 
+// Lists all of the user's receipts with search, sort, and filter controls.
 function ReceiptList() {
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -54,6 +55,7 @@ function ReceiptList() {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { fetchReceipts(); }, []);
 
+  // Fetches the full receipt list for the current user.
   const fetchReceipts = async () => {
     setLoading(true); setError('');
     try {
@@ -75,14 +77,7 @@ function ReceiptList() {
     try {
       const response = await exportReceiptsCsv();
       const blob = new Blob([response.data], { type: 'text/csv;charset=utf-8;' });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement('a');
-      link.href = url;
-      link.setAttribute('download', `WhereIsIt_Receipts_${new Date().toISOString().split('T')[0]}.csv`);
-      document.body.appendChild(link);
-      link.click();
-      document.body.removeChild(link);
-      URL.revokeObjectURL(url);
+      downloadBlob(blob, `WhereIsIt_Receipts_${new Date().toISOString().split('T')[0]}.csv`);
     } catch (err) {
       setExportError(err.response?.data?.error || 'Failed to export receipts');
     } finally {
@@ -94,7 +89,7 @@ function ReceiptList() {
   useEffect(() => {
     let filtered = [...receipts];
 
-    // Text search — store name, item description, notes
+    // Text search - store name, item description, notes
     if (searchTerm) {
       const term = searchTerm.toLowerCase();
       filtered = filtered.filter(r =>
@@ -180,34 +175,7 @@ function ReceiptList() {
   // Collect all unique tags across all receipts for the tag dropdown
   const allTags = [...new Set(receipts.flatMap(r => Array.isArray(r.tags) ? r.tags : []))].sort();
 
-  const getWarrantyStatus = (expiryDate) => {
-    const today = new Date();
-    const expiry = new Date(expiryDate);
-    const daysLeft = Math.ceil((expiry - today) / (1000 * 60 * 60 * 24));
-    if (daysLeft < 0) return 'Expired';
-    if (daysLeft <= 30) return 'Expiring Soon';
-    return 'Active';
-  };
-
-  const getStatusBadgeVariant = (status) => {
-    if (status === 'Active') return 'success';
-    if (status === 'Expiring Soon') return 'warning';
-    if (status === 'Expired') return 'danger';
-    return 'secondary';
-  };
-
-  const formatDate = (dateString) => {
-    if (!dateString) return 'N/A';
-    const date = new Date(dateString);
-    return isNaN(date.getTime()) ? 'N/A'
-      : date.toLocaleDateString('en-GB', { year: 'numeric', month: 'short', day: 'numeric' });
-  };
-
-  const formatCurrency = (amount) => {
-    const parsed = parseFloat(amount);
-    return isNaN(parsed) ? '€0.00' : `€${parsed.toFixed(2)}`;
-  };
-
+  // Resets every filter/sort control back to its default value.
   const clearAllFilters = () => {
     setSearchTerm(''); setFilterStatus('all'); setDateFrom(''); setDateTo('');
     setPriceMin(''); setPriceMax(''); setFilterTag(''); setSortBy('date_desc');
@@ -277,7 +245,7 @@ function ReceiptList() {
           <Collapse in={showFilters}>
             <div className="mt-3 pt-3 border-top">
 
-              {/* Standard filters — available to all users */}
+              {/* Standard filters - available to all users */}
               <p className="text-muted small fw-semibold mb-2">Standard Filters</p>
               <Row className="g-3 mb-3">
                 <Col md={3}>
@@ -359,7 +327,7 @@ function ReceiptList() {
               ) : (
                 <div className="p-3 bg-light rounded border border-warning-subtle">
                   <span className="text-muted small">
-                    <strong>★ Premium filters</strong> — Upgrade to Premium to filter by warranty expiry
+                    <strong>★ Premium filters</strong> - Upgrade to Premium to filter by warranty expiry
                     timeframe, price category, and file type.
                   </span>
                 </div>
@@ -436,7 +404,7 @@ function ReceiptList() {
                                 <span key={tag} className="badge rounded-pill bg-light text-dark border"
                                   style={{ fontSize: '0.75rem' }}>{tag}</span>
                               ))
-                              : <span className="text-muted small">—</span>}
+                              : <span className="text-muted small">-</span>}
                           </div>
                         </td>
                         <td>{formatDate(receipt.purchaseDate)}</td>

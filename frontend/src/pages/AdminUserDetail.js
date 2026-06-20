@@ -8,7 +8,7 @@
  * recent login history, and account action history.
  *
  * Account actions available (all require a written reason):
- * - Change Tier (FREE ↔ PREMIUM)
+ * - Change Tier (FREE <> PREMIUM)
  * - Suspend Account (min 20 char reason)
  * - Reactivate Account
  * - Reset Password (triggers email to user)
@@ -29,7 +29,9 @@ import {
   adminResetPassword,
   adminResetMfa
 } from '../services/api';
+import { formatDate, formatDateTime } from '../utils/format';
 
+// Full admin detail/management view for a single user account.
 function AdminUserDetail() {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -56,10 +58,11 @@ function AdminUserDetail() {
   // Action loading states
   const [actionLoading, setActionLoading] = useState(false);
   const [actionError, setActionError] = useState('');
-  const [previewUrl, setPreviewUrl] = useState('');
 
+  // Reloads the user whenever the route's :id param changes.
   useEffect(() => { fetchUser(); }, [id]);
 
+  // Fetches the full detail record for this user.
   const fetchUser = async () => {
     setLoading(true); setError('');
     try {
@@ -72,8 +75,9 @@ function AdminUserDetail() {
     }
   };
 
+  // Clears form state and errors for every action modal.
   const resetModalState = () => {
-    setActionError(''); setPreviewUrl('');
+    setActionError('');
     setTierForm({ newTier: 'FREE', reason: '' });
     setSuspendForm({ reason: '' });
     setReactivateForm({ reason: '' });
@@ -81,6 +85,7 @@ function AdminUserDetail() {
     setResetMfaForm({ justification: '', adminPassword: '' });
   };
 
+  // Closes every action modal and resets their form state.
   const handleCloseAll = () => {
     setShowTierModal(false); setShowSuspendModal(false);
     setShowReactivateModal(false); setShowResetPasswordModal(false);
@@ -88,16 +93,17 @@ function AdminUserDetail() {
     resetModalState();
   };
 
-  const showSuccess = (msg, url = '') => {
+  // Shows a success banner, closes the active modal, and refreshes the user record.
+  const showSuccess = (msg) => {
     setActionSuccess(msg);
-    setPreviewUrl(url);
     handleCloseAll();
     fetchUser(); // Refresh user data
-    setTimeout(() => { setActionSuccess(''); setPreviewUrl(''); }, 8000);
+    setTimeout(() => setActionSuccess(''), 8000);
   };
 
-  // ── Action handlers ───────────────────────────────────────────────────────
+  // ────────────────────── Action handlers ───────────────────────────────────
 
+  // Changes the user's FREE/PREMIUM tier after validating the reason.
   const handleChangeTier = async () => {
     if (tierForm.reason.trim().length < 10) {
       setActionError('Reason must be at least 10 characters'); return;
@@ -111,6 +117,7 @@ function AdminUserDetail() {
     } finally { setActionLoading(false); }
   };
 
+  // Suspends the account after validating the reason length.
   const handleSuspend = async () => {
     if (suspendForm.reason.trim().length < 20) {
       setActionError('Suspension reason must be at least 20 characters'); return;
@@ -124,6 +131,7 @@ function AdminUserDetail() {
     } finally { setActionLoading(false); }
   };
 
+  // Reactivates a suspended account after validating the reason length.
   const handleReactivate = async () => {
     if (reactivateForm.reason.trim().length < 10) {
       setActionError('Reason must be at least 10 characters'); return;
@@ -137,19 +145,21 @@ function AdminUserDetail() {
     } finally { setActionLoading(false); }
   };
 
+  // Triggers a password reset email after validating the reason length.
   const handleResetPassword = async () => {
     if (resetPwForm.reason.trim().length < 10) {
       setActionError('Reason must be at least 10 characters'); return;
     }
     setActionLoading(true); setActionError('');
     try {
-      const response = await adminResetPassword(id, resetPwForm.reason);
-      showSuccess('Password reset email sent to user', response.data.previewUrl);
+      await adminResetPassword(id, resetPwForm.reason);
+      showSuccess('Password reset email sent to user');
     } catch (err) {
       setActionError(err.response?.data?.error || 'Failed to send reset email');
     } finally { setActionLoading(false); }
   };
 
+  // Resets the user's MFA after validating the justification and re-entered admin password.
   const handleResetMfa = async () => {
     if (resetMfaForm.justification.trim().length < 50) {
       setActionError('Justification must be at least 50 characters'); return;
@@ -159,30 +169,16 @@ function AdminUserDetail() {
     }
     setActionLoading(true); setActionError('');
     try {
-      const response = await adminResetMfa(id, resetMfaForm.justification, resetMfaForm.adminPassword);
-      showSuccess('MFA reset successfully. User has been notified.', response.data.previewUrl);
+      await adminResetMfa(id, resetMfaForm.justification, resetMfaForm.adminPassword);
+      showSuccess('MFA reset successfully. User has been notified.');
     } catch (err) {
       setActionError(err.response?.data?.error || 'Failed to reset MFA');
     } finally { setActionLoading(false); }
   };
 
-  // ── Helpers ───────────────────────────────────────────────────────────────
+  // ────────────────────────── Helpers ───────────────────────────────────────
 
-  const formatDate = (ts) => {
-    if (!ts) return '—';
-    return new Date(ts).toLocaleString('en-GB', {
-      day: '2-digit', month: 'short', year: 'numeric',
-      hour: '2-digit', minute: '2-digit'
-    });
-  };
-
-  const formatShortDate = (ts) => {
-    if (!ts) return '—';
-    return new Date(ts).toLocaleDateString('en-GB', {
-      day: '2-digit', month: 'short', year: 'numeric'
-    });
-  };
-
+  // Maps an audit log action to a Bootstrap badge colour.
   const getActionBadgeVariant = (action) => {
     if (action?.includes('LOGIN')) return 'success';
     if (action?.includes('MFA')) return 'warning';
@@ -191,7 +187,7 @@ function AdminUserDetail() {
     return 'secondary';
   };
 
-  // ── Render ────────────────────────────────────────────────────────────────
+  // ─────────────────────────────── Render ───────────────────────────────────
 
   if (loading) return (
     <Container className="mt-0 text-center py-5">
@@ -231,14 +227,8 @@ function AdminUserDetail() {
       </div>
 
       {actionSuccess && (
-        <Alert variant="success" dismissible onClose={() => { setActionSuccess(''); setPreviewUrl(''); }}>
+        <Alert variant="success" dismissible onClose={() => setActionSuccess('')}>
           {actionSuccess}
-          {previewUrl && (
-            <div className="mt-2">
-              <a href={previewUrl} target="_blank" rel="noopener noreferrer"
-                className="btn btn-sm btn-outline-primary">📧 Open Email Preview</a>
-            </div>
-          )}
         </Alert>
       )}
 
@@ -260,7 +250,7 @@ function AdminUserDetail() {
                     <td>{user.mfaEnabled
                       ? <><Badge bg="success">Enabled</Badge><small className="text-muted ms-2">({user.remainingRecoveryCodes} recovery codes)</small></>
                       : <Badge bg="warning" text="dark">Disabled</Badge>}</td></tr>
-                  <tr><td className="text-muted">Registered</td><td>{formatShortDate(user.createdAt)}</td></tr>
+                  <tr><td className="text-muted">Registered</td><td>{formatDate(user.createdAt)}</td></tr>
                   <tr><td className="text-muted">Receipts</td><td>{user.receiptCount}</td></tr>
                 </tbody>
               </table>
@@ -334,7 +324,7 @@ function AdminUserDetail() {
                         <td><Badge bg={login.action === 'LOGIN_SUCCESS' ? 'success' : 'danger'} style={{ fontSize: '0.65rem' }}>
                           {login.action === 'LOGIN_SUCCESS' ? 'Success' : 'Failed'}</Badge></td>
                         <td><small className="text-muted font-monospace">{login.ip_address || '—'}</small></td>
-                        <td><small className="text-muted">{formatDate(login.created_at)}</small></td>
+                        <td><small className="text-muted">{formatDateTime(login.created_at)}</small></td>
                       </tr>
                     ))}
                   </tbody>
@@ -364,7 +354,7 @@ function AdminUserDetail() {
                         <td><small className="text-muted">
                           {entry.details?.substring(0, 50)}{entry.details?.length > 50 ? '…' : ''}
                         </small></td>
-                        <td><small className="text-muted">{formatDate(entry.created_at)}</small></td>
+                        <td><small className="text-muted">{formatDateTime(entry.created_at)}</small></td>
                       </tr>
                     ))}
                   </tbody>
@@ -375,7 +365,7 @@ function AdminUserDetail() {
         </Col>
       </Row>
 
-      {/* ── MODALS ─────────────────────────────────────────────────────────── */}
+      {/* ────────────────────────── MODALS ─────────────────────────────────── */}
 
       {/* Change Tier Modal */}
       <Modal show={showTierModal} onHide={handleCloseAll} centered>
