@@ -24,7 +24,7 @@ const { env } = require('../config/env');
 class EmailService {
   constructor() {
     this.fromAddress = env.email.fromAddress;
-    this.appBaseUrl = process.env.APP_BASE_URL || 'http://localhost:3000';
+    this.appBaseUrl = env.appBaseUrl;
     this.resendClient = new Resend(env.email.resendApiKey);
   }
 

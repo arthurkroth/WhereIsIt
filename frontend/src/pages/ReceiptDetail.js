@@ -48,12 +48,14 @@ function ReceiptDetail() {
   }, [editItems, editing]);
 
   // Downloads the attached receipt file as a blob for in-page preview.
+  // Uses getReceiptFileUrl (from api.js) so the URL automatically points to
+  // the right place on both localhost and production — no hardcoded host here.
   useEffect(() => {
     if (!receipt?.hasFile) return;
     const fetchFile = async () => {
       try {
         const token = localStorage.getItem('token');
-        const res = await fetch(`http://localhost:3001/receipts/${receipt.id}/file`,
+        const res = await fetch(getReceiptFileUrl(receipt.id),
           { headers: { Authorization: `Bearer ${token}` } });
         if (!res.ok) return;
         const blob = await res.blob();

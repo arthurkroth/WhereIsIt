@@ -14,6 +14,7 @@ const { receiptRoutes } = require('./routes/receiptRoutes');
 const { adminRoutes } = require("./routes/adminRoutes");
 const { premiumRoutes } = require("./routes/premiumRoutes");
 const { errorMiddleware } = require("./middleware/errorMiddleware");
+const { env } = require("./config/env");
 
 /**
  * Creates and configures the Express app.
@@ -25,7 +26,9 @@ function createApp() {
   app.set('trust proxy', 1);
 
   app.use(helmet());
-  app.use(cors({ origin: true, credentials: true }));
+  // Restricted to the app's own public URL — was previously origin: true,
+  // which reflected and allowed any origin.
+  app.use(cors({ origin: env.appBaseUrl, credentials: true }));
   app.use(express.json({ limit: "1mb" }));
 
   app.use(

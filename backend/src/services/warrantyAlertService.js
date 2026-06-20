@@ -26,6 +26,7 @@
 
 const cron = require('node-cron');
 const { db } = require('../config/db');
+const { env } = require('../config/env');
 const { EncryptionService } = require('../services/encryptionService');
 const emailService = require('../services/emailService');
 
@@ -273,7 +274,7 @@ async function sendDigestAlert(user, items) {
         <tbody>${itemRows}</tbody>
       </table>
       <div style="text-align: center; margin: 30px 0;">
-        <a href="${process.env.APP_BASE_URL}/receipts"
+        <a href="${env.appBaseUrl}/receipts"
            style="background: #0d6efd; color: white; padding: 12px 24px;
                   text-decoration: none; border-radius: 6px; font-size: 16px;">
           View My Receipts
@@ -282,7 +283,7 @@ async function sendDigestAlert(user, items) {
       <p style="color: #666; font-size: 13px;">
         You are receiving this because you have warranty alerts enabled in your WhereIsIt? Premium account.
         To adjust preferences, visit your
-        <a href="${process.env.APP_BASE_URL}/profile">Profile Settings</a>.
+        <a href="${env.appBaseUrl}/profile">Profile Settings</a>.
       </p>
       <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
       <p style="color: #aaa; font-size: 12px; text-align: center;">WhereIsIt? — Keep track of your receipts and warranties</p>
@@ -318,7 +319,7 @@ async function sendImmediateAlert(user, item) {
         </strong>
       </div>
       <div style="text-align: center; margin: 30px 0;">
-        <a href="${process.env.APP_BASE_URL}/receipts/${item.receiptId}"
+        <a href="${env.appBaseUrl}/receipts/${item.receiptId}"
            style="background: #0d6efd; color: white; padding: 12px 24px;
                   text-decoration: none; border-radius: 6px; font-size: 16px;">
           View Receipt
@@ -368,7 +369,7 @@ async function sendSampleTestEmail(user) {
       </table>
       <p style="color: #666; font-size: 13px;">
         Your alert preferences are configured in your
-        <a href="${process.env.APP_BASE_URL}/profile">Profile Settings</a>.
+        <a href="${env.appBaseUrl}/profile">Profile Settings</a>.
       </p>
       <hr style="border: none; border-top: 1px solid #eee; margin: 20px 0;">
       <p style="color: #aaa; font-size: 12px; text-align: center;">WhereIsIt? — Keep track of your receipts and warranties</p>
