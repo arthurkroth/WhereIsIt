@@ -1,5 +1,49 @@
 # Changelog
 
+## [0.8.0] - 06/07/2026 - Unit testing, security hardening, Premium subscription flow, and submission polish.
+
+### Added
+
+#### Unit Testing
+- Jest configured in `backend/package.json` with `npm test --coverage`. 4 test suites, 32 tests, all passing
+- `src/__tests__/encryptionService.test.js` - 7 tests covering AES-256-GCM encrypt/decrypt round-trips, random IV uniqueness (same plaintext produces different ciphertexts), UTF-8 character handling, empty string edge case, and tampered-ciphertext resilience
+- `src/__tests__/mfaService.test.js` - 6 tests covering TOTP secret generation format, `getOtpauthUrl` URL structure, and token verification (correct code, wrong code, and cross-secret rejection). Achieves 100% line and branch coverage on `mfaService.js`
+- `src/__tests__/warrantyCalculations.test.js` - 10 tests covering `calculateWarrantyExpiry` (month arithmetic, rollover, zero-month warranty, output format) and `getWarrantyStatus` (expired, active, expiring-soon) and `getFileType` (pdf, image formats, null for manual entries, unknown extensions)
+- `src/__tests__/authService.test.js` - 6 tests covering JWT structure validation (three-segment format), payload field correctness (userId, role, firstName, lastName), role-based expiry windows (FREE/PREMIUM ≈ 60 min, ADMIN ≈ 30 min), and rejection of tokens verified with the wrong secret
+- `frontend/src/utils/format.test.js` - 21 tests covering `formatDate`, `formatDateTime`, `formatCurrency`, `getDaysLeft`, `getWarrantyStatus`, and `getStatusBadgeVariant` (including both frontend-computed labels and backend snake_case status strings)
+
+#### Premium Subscription Flow
+- `Upgrade to Premium` tab added to the Profile page (FREE users only) - two plan cards (1 Month: €4.99, 6 Months: €24.99), Revolut QR code rendered inline via `qrcode.react`, payment instructions including email-in-reference prompt, and an "I've sent the payment" button that pre-fills and navigates to the Contact Support tab
+- Premium subscription status display in Account Details tab (PREMIUM users) showing expiry date or "Permanent" badge
+- `backend/src/services/premiumExpiryService.js` - new daily cron (03:00 UTC) that reverts expired PREMIUM accounts to FREE and sends notification emails; also a monthly cron (1st of month, 04:00 UTC) that enforces the 2-year audit log data retention policy from the Privacy Policy
+- Admin Change Tier modal updated with expiry date picker and "Permanently Premium" checkbox; Account Overview card now shows `premium_expires_at` and `premium_permanent` for PREMIUM users
+- `emailService.sendPremiumExpiryWarning()` and `emailService.sendPremiumExpired()` - two new branded transactional emails sent 7 days before and on the day of subscription expiry respectively
+- `users.premium_expires_at TIMESTAMP DEFAULT NULL` and `users.premium_permanent BOOLEAN NOT NULL DEFAULT FALSE` - two new database columns (run `ALTER TABLE users ADD COLUMN premium_expires_at TIMESTAMP DEFAULT NULL, ADD COLUMN premium_permanent BOOLEAN NOT NULL DEFAULT FALSE;` on any existing database)
+- `DELETE /auth/account` backend endpoint - requires current password confirmation, writes `ACCOUNT_DELETED` audit log entry before deletion, then removes the user row (database CASCADE handles receipts, MFA codes, tickets, premium settings)
+- Danger Zone section in Profile → Account Details - two-step confirmation UI (button → password field + warning) preventing accidental account deletion
+- OCR processing time now logged to the backend console on every upload (`OCR processing time: 4.23s (FREE - tesseract)`) providing concrete data for the Non-Functional Requirements evaluation
+
+#### Legal Documentation
+- `Terms.js` - new Section 5a "Payments and Subscriptions" covering Revolut payment handling, manual activation process, no-refund policy, and explicit service-discontinuation risk warning for the academic project context
+- `Privacy.js` - Section 7 updated to accurately reflect Resend email delivery and Revolut payment processing (replacing the stale Ethereal/Nodemailer reference); confirms no payment card data is stored by the application
+
+### Changed
+- Degraded users (were PREMIUM, reverted to FREE with >10 receipts) now see a descriptive error on upload: "You have X receipts stored. Free accounts are limited to 10. Delete existing receipts to upload more, or upgrade to Premium." - previously showed the same generic limit message as a user who had just reached 10
+- Dashboard storage `ProgressBar` capped at 100% (`Math.min`) so degraded users with >10 receipts don't render an overflowing bar
+- `adminChangeTier` in `api.js` updated to pass optional `expiresAt` and `permanent` fields
+- `getProfile` (`authController.js`) and `getUserById` (`adminController.js`) now return `premiumExpiresAt` and `premiumPermanent` fields
+- `backend/package.json` - `jest` added to `devDependencies`, `"test": "jest --coverage"` script added, Jest configuration block added (`testEnvironment: node`, `testMatch`, `collectCoverageFrom`)
+
+### Fixed
+
+#### Security - Stored HTML Injection in Admin Notification Emails
+- `escapeHtml()` helper added to `adminController.js` and applied to all six email templates that previously interpolated user-controlled strings without sanitisation: `user.first_name` (tier change, suspension, reactivation, password reset, MFA reset emails) and `ticket.first_name`, `ticket.subject`, `response.trim()`, `ticket.status` (support ticket response email). A malicious user could craft a ticket subject containing `<script>` tags or spoofed HTML that would render in the admin's email client.
+
+### Database Migrations
+- `ALTER TABLE users ADD COLUMN premium_expires_at TIMESTAMP DEFAULT NULL` - tracks when a manually-granted Premium subscription expires
+- `ALTER TABLE users ADD COLUMN premium_permanent BOOLEAN NOT NULL DEFAULT FALSE` - flags accounts that should never be auto-reverted by the expiry cron
+
+
 ## [0.7.0] - 20/06/2026 - UI redesign and security/vulnerability hardening.
 
 ### Added

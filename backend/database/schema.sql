@@ -40,6 +40,10 @@ CREATE TABLE IF NOT EXISTS users (
   email_verification_token     VARCHAR(64)   DEFAULT NULL,
   email_verification_expires   DATETIME      DEFAULT NULL,
 
+  -- Premium subscription management
+  premium_expires_at           TIMESTAMP     DEFAULT NULL,  -- NULL = no expiry set or not premium
+  premium_permanent            BOOLEAN       NOT NULL DEFAULT FALSE, -- TRUE = never expires
+
   created_at                   TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP,
   updated_at                   TIMESTAMP     NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP
   -- No separate INDEX on email: the UNIQUE constraint above already creates one.

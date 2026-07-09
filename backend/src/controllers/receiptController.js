@@ -124,8 +124,11 @@ async function uploadReceipt(req, res) {
     const { limitReached, count } = await checkStorageLimit(userId, userRole);
     if (limitReached) {
       await fs.unlink(file.path).catch(() => {});
+      const message = count > FREE_TIER_LIMIT
+        ? `You have ${count} receipts stored. Free accounts are limited to ${FREE_TIER_LIMIT}. Delete existing receipts to upload more, or upgrade to Premium.`
+        : `Free tier limit reached. You have ${count}/${FREE_TIER_LIMIT} receipts. Upgrade to Premium for unlimited storage.`;
       return res.status(403).json({
-        error: `Free tier limit reached. You have ${count}/${FREE_TIER_LIMIT} receipts. Upgrade to Premium for unlimited storage.`,
+        error: message,
         limitReached: true, upgradeRequired: true
       });
     }
@@ -143,7 +146,10 @@ async function uploadReceipt(req, res) {
 
     // Pass userRole so the service routes to OpenAI or Tesseract accordingly.
     // If OpenAI fails, the service falls back to Tesseract and sets aiProviderError.
+    const ocrStart = Date.now();
     const ocrResult = await ocrService.processReceipt(file.path, file.mimetype, userRole);
+    const ocrMs = Date.now() - ocrStart;
+    console.log(`OCR processing time: ${(ocrMs / 1000).toFixed(2)}s (${userRole} — ${ocrResult.aiProviderError ? 'tesseract-fallback' : (userRole === 'PREMIUM' ? 'openai' : 'tesseract')})`);
     const extractedData = ocrService.validateExtractedData(ocrResult.extractedData);
     const encryptedStoreName = encryption.encrypt(extractedData.storeName);
 
@@ -214,8 +220,11 @@ async function createManualReceipt(req, res) {
 
     const { limitReached, count } = await checkStorageLimit(userId, userRole);
     if (limitReached) {
+      const message = count > FREE_TIER_LIMIT
+        ? `You have ${count} receipts stored. Free accounts are limited to ${FREE_TIER_LIMIT}. Delete existing receipts to upload more, or upgrade to Premium.`
+        : `Free tier limit reached. You have ${count}/${FREE_TIER_LIMIT} receipts. Upgrade to Premium for unlimited storage.`;
       return res.status(403).json({
-        error: `Free tier limit reached. You have ${count}/${FREE_TIER_LIMIT} receipts.`,
+        error: message,
         limitReached: true, upgradeRequired: true
       });
     }

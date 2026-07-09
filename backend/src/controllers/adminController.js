@@ -15,6 +15,18 @@ const fs = require('fs').promises;
 const emailService = require('../services/emailService');
 const { generateReport, listReportFiles, REPORTS_DIR } = require('../services/reportService');
 
+// Escapes HTML special characters in user-supplied strings before they are
+// interpolated into outbound email HTML bodies, preventing stored HTML injection.
+function escapeHtml(str) {
+  if (!str) return '';
+  return String(str)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+    .replace(/'/g, '&#39;');
+}
+
 // ============================================================================
 // DASHBOARD
 // ============================================================================
@@ -97,7 +109,7 @@ async function searchUsers(req, res) {
 
 async function getUserById(req, res) {
   const { id } = req.params;
-  const [userRows] = await db.execute(`SELECT id, email, first_name, last_name, role, status, email_verified, mfa_enabled, created_at FROM users WHERE id = ?`, [id]);
+  const [userRows] = await db.execute(`SELECT id, email, first_name, last_name, role, status, email_verified, mfa_enabled, created_at, premium_expires_at, premium_permanent FROM users WHERE id = ?`, [id]);
   if (userRows.length === 0) return res.status(404).json({ error: 'User not found' });
   const user = userRows[0];
   const [receiptCount] = await db.execute('SELECT COUNT(*) AS count FROM receipts WHERE user_id = ?', [id]);
@@ -111,7 +123,7 @@ async function getUserById(req, res) {
     const [psRows] = await db.execute('SELECT alerts_enabled, alert_timeframe_days, alert_frequency, last_alert_sent FROM premium_settings WHERE user_id = ?', [id]);
     if (psRows.length > 0) premiumSettings = psRows[0];
   }
-  return res.json({ success: true, user: { id: user.id, email: user.email, firstName: user.first_name, lastName: user.last_name, role: user.role, status: user.status, mfaEnabled: user.mfa_enabled === 1 || user.mfa_enabled === true, emailVerified: user.email_verified === 1 || user.email_verified === true, createdAt: user.created_at, receiptCount: parseInt(receiptCount[0].count), remainingRecoveryCodes: parseInt(codeCount[0].count), recentLogins, actionHistory, premiumSettings } });
+  return res.json({ success: true, user: { id: user.id, email: user.email, firstName: user.first_name, lastName: user.last_name, role: user.role, status: user.status, mfaEnabled: user.mfa_enabled === 1 || user.mfa_enabled === true, emailVerified: user.email_verified === 1 || user.email_verified === true, createdAt: user.created_at, receiptCount: parseInt(receiptCount[0].count), remainingRecoveryCodes: parseInt(codeCount[0].count), recentLogins, actionHistory, premiumSettings, premiumExpiresAt: user.premium_expires_at || null, premiumPermanent: user.premium_permanent === 1 || user.premium_permanent === true } });
 }
 
 // ============================================================================
@@ -121,7 +133,7 @@ async function getUserById(req, res) {
 async function changeTier(req, res) {
   const adminId = req.user.userId;
   const { id } = req.params;
-  const { newTier, reason } = req.body;
+  const { newTier, reason, expiresAt = null, permanent = false } = req.body;
   if (!['FREE', 'PREMIUM'].includes(newTier)) return res.status(400).json({ error: 'Invalid tier' });
   if (!reason || reason.trim().length < 10) return res.status(400).json({ error: 'Reason must be at least 10 characters' });
   if (parseInt(id) === adminId) return res.status(400).json({ error: 'You cannot change your own tier' });
@@ -130,12 +142,28 @@ async function changeTier(req, res) {
   const user = userRows[0];
   const oldTier = user.role;
   if (oldTier === newTier) return res.status(400).json({ error: `User is already on the ${newTier} tier` });
-  await db.execute('UPDATE users SET role = ? WHERE id = ?', [newTier, id]);
+
+  // Update role and premium subscription columns together
+  if (newTier === 'PREMIUM') {
+    const isPermanent = permanent === true;
+    const expiryValue = isPermanent ? null : (expiresAt || null);
+    await db.execute(
+      'UPDATE users SET role = ?, premium_permanent = ?, premium_expires_at = ? WHERE id = ?',
+      [newTier, isPermanent, expiryValue, id]
+    );
+  } else {
+    // Reverting to FREE — clear subscription data
+    await db.execute(
+      'UPDATE users SET role = ?, premium_permanent = FALSE, premium_expires_at = NULL WHERE id = ?',
+      [newTier, id]
+    );
+  }
+
   try {
     await emailService.sendEmail({
       to: user.email,
       subject: `Your WhereIsIt? account has been updated to ${newTier}`,
-      html: `<p>Hi ${user.first_name}, your account tier has been changed from <strong>${oldTier}</strong> to <strong>${newTier}</strong>.</p>`
+      html: `<p>Hi ${escapeHtml(user.first_name)}, your account tier has been changed from <strong>${oldTier}</strong> to <strong>${newTier}</strong>.</p>`
     });
   } catch (err) { console.error('Failed to send tier change email:', err.message); }
   await db.execute("INSERT INTO audit_logs (user_id, action, details, ip_address) VALUES (?, ?, ?, ?)", [adminId, 'ADMIN_TIER_CHANGE', `Admin changed user ${id} (${user.email}) from ${oldTier} to ${newTier}. Reason: ${reason.trim()}`, req.ip]);
@@ -158,7 +186,7 @@ async function suspendAccount(req, res) {
     await emailService.sendEmail({
       to: user.email,
       subject: 'Your WhereIsIt? account has been suspended',
-      html: `<p>Hi ${user.first_name}, your account has been suspended. Please contact support.</p>`
+      html: `<p>Hi ${escapeHtml(user.first_name)}, your account has been suspended. Please contact support.</p>`
     });
   } catch (err) { console.error('Failed to send suspension email:', err.message); }
   await db.execute("INSERT INTO audit_logs (user_id, action, details, ip_address) VALUES (?, ?, ?, ?)", [adminId, 'ADMIN_ACCOUNT_SUSPENDED', `Admin suspended user ${id} (${user.email}). Reason: ${reason.trim()}`, req.ip]);
@@ -179,7 +207,7 @@ async function reactivateAccount(req, res) {
     await emailService.sendEmail({
       to: user.email,
       subject: 'Your WhereIsIt? account has been reactivated',
-      html: `<p>Hi ${user.first_name}, your account has been reactivated. You can now log in.</p>`
+      html: `<p>Hi ${escapeHtml(user.first_name)}, your account has been reactivated. You can now log in.</p>`
     });
   } catch (err) { console.error('Failed to send reactivation email:', err.message); }
   await db.execute("INSERT INTO audit_logs (user_id, action, details, ip_address) VALUES (?, ?, ?, ?)", [adminId, 'ADMIN_ACCOUNT_REACTIVATED', `Admin reactivated user ${id} (${user.email}). Reason: ${reason.trim()}`, req.ip]);
@@ -203,7 +231,7 @@ async function adminResetPassword(req, res) {
     await emailService.sendEmail({
       to: user.email,
       subject: 'Password reset for your WhereIsIt? account',
-      html: `<p>Hi ${user.first_name}, an admin has triggered a password reset. <a href="${resetUrl}">Reset your password</a> (expires in 24 hours).</p>`
+      html: `<p>Hi ${escapeHtml(user.first_name)}, an admin has triggered a password reset. <a href="${resetUrl}">Reset your password</a> (expires in 24 hours).</p>`
     });
   } catch (err) { console.error('Failed to send reset email:', err.message); }
   await db.execute("INSERT INTO audit_logs (user_id, action, details, ip_address) VALUES (?, ?, ?, ?)", [adminId, 'ADMIN_PASSWORD_RESET', `Admin initiated password reset for user ${id} (${user.email}). Reason: ${reason.trim()}`, req.ip]);
@@ -230,7 +258,7 @@ async function adminResetMfa(req, res) {
     await emailService.sendEmail({
       to: user.email,
       subject: '⚠ Security Alert: MFA has been reset on your account',
-      html: `<p>Hi ${user.first_name}, <strong>MFA has been disabled on your account by an administrator.</strong> If you did not request this, contact support immediately.</p>`
+      html: `<p>Hi ${escapeHtml(user.first_name)}, <strong>MFA has been disabled on your account by an administrator.</strong> If you did not request this, contact support immediately.</p>`
     });
   } catch (err) { console.error('Failed to send MFA reset notification:', err.message); }
   await db.execute("INSERT INTO audit_logs (user_id, action, details, ip_address) VALUES (?, ?, ?, ?)", [adminId, 'ADMIN_MFA_RESET', `SECURITY: Admin reset MFA for user ${id} (${user.email}). MFA was ${mfaWasEnabled ? 'enabled' : 'disabled'}. Justification: ${justification.trim()}`, req.ip]);
@@ -278,8 +306,8 @@ async function updateTicket(req, res) {
     try {
       await emailService.sendEmail({
         to: ticket.email,
-        subject: `Re: ${ticket.subject} [Ticket #${id}]`,
-        html: `<p>Hi ${ticket.first_name},</p><blockquote>${response.trim()}</blockquote><p>Status: <strong>${status || ticket.status}</strong></p>`
+        subject: `Re: ${escapeHtml(ticket.subject)} [Ticket #${id}]`,
+        html: `<p>Hi ${escapeHtml(ticket.first_name)},</p><blockquote>${escapeHtml(response.trim())}</blockquote><p>Status: <strong>${escapeHtml(status || ticket.status)}</strong></p>`
       });
     } catch (err) { console.error('Failed to send ticket response email:', err.message); }
   }

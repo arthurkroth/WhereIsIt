@@ -184,11 +184,23 @@ function Privacy() {
             <h4>7. Data Sharing</h4>
             <p>
               We do not sell, rent, or share your personal data with any third parties.
-              Your data is stored locally on the application server and is not transmitted
-              to any external services, with the exception of transactional emails sent via
-              Nodemailer (using Ethereal Email in development — a local fake SMTP service
-              that does not deliver emails externally).
+              Your data is stored on the application server and is not transmitted
+              to any external services, with the exception of:
             </p>
+            <ul>
+              <li>
+                <strong>Transactional emails</strong> sent via Resend (resend.com), a
+                third-party email delivery service. Resend receives only the recipient address,
+                subject, and body of each email. No sensitive account or receipt data is included
+                in these emails beyond what is necessary for the notification itself.
+              </li>
+              <li>
+                <strong>Premium subscription payments</strong> are processed exclusively via
+                Revolut (revolut.com). WhereIsIt? does not store, process, or have access to any
+                payment card details, Revolut account information, or transaction identifiers.
+                Payment confirmation is received only through user-submitted support tickets.
+              </li>
+            </ul>
           </section>
 
           <section className="mb-4">

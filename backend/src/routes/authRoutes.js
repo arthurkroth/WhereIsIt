@@ -29,7 +29,8 @@ const {
   createSupportTicket,
   getUserTickets,
   replyToTicket,
-  allowTriggeredEmail
+  allowTriggeredEmail,
+  deleteAccount
 } = require("../controllers/authController");
 
 const authRoutes = Router();
@@ -164,5 +165,8 @@ authRoutes.put("/change-password",    requireAuth, asyncHandler(changePassword))
 authRoutes.post("/support",           requireAuth, asyncHandler(createSupportTicket));
 authRoutes.get("/support",            requireAuth, asyncHandler(getUserTickets));
 authRoutes.put("/support/:id",        requireAuth, asyncHandler(replyToTicket));
+
+// DELETE /auth/account — permanently delete the authenticated user's own account
+authRoutes.delete("/account",          requireAuth, asyncHandler(deleteAccount));
 
 module.exports = { authRoutes };

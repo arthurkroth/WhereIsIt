@@ -135,7 +135,7 @@ function Dashboard() {
               <span className="text-muted small">{storageInfo.used} / {storageInfo.limit} receipts</span>
             </div>
             <ProgressBar
-              now={(storageInfo.used / storageInfo.limit) * 100}
+              now={Math.min((storageInfo.used / storageInfo.limit) * 100, 100)}
               variant={getStorageBarVariant(storageInfo.used, storageInfo.limit)}
               style={{ height: '10px' }}
             />
