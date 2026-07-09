@@ -164,6 +164,91 @@ class EmailService {
       html
     });
   }
+
+  /**
+   * Sends a 7-day expiry warning to a Premium user.
+   *
+   * @param {string} toEmail
+   * @param {string} firstName
+   * @param {Date|string} expiresAt
+   * @returns {Promise<void>}
+   */
+  async sendPremiumExpiryWarning(toEmail, firstName, expiresAt) {
+    const expiryDate = new Date(expiresAt).toLocaleDateString('en-GB', {
+      day: '2-digit', month: 'long', year: 'numeric'
+    });
+
+    const html = `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <h2 style="color: #f59e0b;">Your Premium subscription is expiring soon</h2>
+        <p>Hi ${firstName},</p>
+        <p>Your WhereIsIt? Premium subscription will expire on <strong>${expiryDate}</strong>.</p>
+        <p>After expiry your account will revert to the Free tier. You will keep all your
+        stored receipts, but you will not be able to upload more if you already have more
+        than 10.</p>
+
+        <div style="text-align: center; margin: 32px 0;">
+          <a href="${this.appBaseUrl}/profile"
+             style="background-color: #1B3F7A; color: white; padding: 14px 28px;
+                    text-decoration: none; border-radius: 6px; font-size: 16px;">
+            Renew Your Subscription
+          </a>
+        </div>
+
+        <hr style="border: none; border-top: 1px solid #eee; margin: 24px 0;">
+        <p style="color: #aaa; font-size: 12px; text-align: center;">
+          WhereIsIt? - Keep track of your receipts and warranties
+        </p>
+      </div>
+    `;
+
+    await this.sendEmail({
+      to: toEmail,
+      subject: 'Your WhereIsIt? Premium subscription is expiring soon',
+      html
+    });
+  }
+
+  /**
+   * Notifies a user that their Premium subscription has expired and they
+   * have been reverted to the Free tier.
+   *
+   * @param {string} toEmail
+   * @param {string} firstName
+   * @returns {Promise<void>}
+   */
+  async sendPremiumExpired(toEmail, firstName) {
+    const html = `
+      <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto;">
+        <h2 style="color: #dc3545;">Your Premium subscription has expired</h2>
+        <p>Hi ${firstName},</p>
+        <p>Your WhereIsIt? Premium subscription has expired and your account has been
+        reverted to the Free tier.</p>
+        <p>All your receipts are still safely stored. If you have more than 10 receipts,
+        you can still view and manage them — you just won't be able to upload new ones
+        until you either delete some existing receipts or renew your Premium subscription.</p>
+
+        <div style="text-align: center; margin: 32px 0;">
+          <a href="${this.appBaseUrl}/profile"
+             style="background-color: #3CB54A; color: white; padding: 14px 28px;
+                    text-decoration: none; border-radius: 6px; font-size: 16px;">
+            Upgrade to Premium Again
+          </a>
+        </div>
+
+        <hr style="border: none; border-top: 1px solid #eee; margin: 24px 0;">
+        <p style="color: #aaa; font-size: 12px; text-align: center;">
+          WhereIsIt? - Keep track of your receipts and warranties
+        </p>
+      </div>
+    `;
+
+    await this.sendEmail({
+      to: toEmail,
+      subject: 'Your WhereIsIt? Premium subscription has expired',
+      html
+    });
+  }
 }
 
 // Export a single shared instance so the Resend client is only created once

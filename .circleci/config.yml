@@ -282,9 +282,43 @@ jobs:
           path: dependency-check-report
           destination: owasp-dependency-check-report
 
+  # ---------------------------------------------------------------------------
+  # JOB 6: Unit Tests
+  # Runs the backend Jest test suite (32 tests: AES-256-GCM encryption,
+  # TOTP/MFA, warranty calculations, JWT issuance) and the frontend CRA
+  # Jest suite (21 tests: date/currency formatting, warranty status helpers).
+  #
+  # All backend tests are self-contained — they set their own fake env vars
+  # at the top of each file so no real database or .env is needed in CI.
+  # Frontend tests use Create React App's built-in Jest runner.
+  #
+  # This is a HARD FAIL job. Broken tests block the merge to main.
+  # ---------------------------------------------------------------------------
+  unit-tests:
+    docker:
+      - image: cimg/node:20.18
+    steps:
+      - checkout
+
+      - run:
+          name: Install backend dependencies
+          command: cd backend && npm install
+
+      - run:
+          name: Run backend unit tests (Jest)
+          command: cd backend && npm test -- --ci --forceExit
+
+      - run:
+          name: Install frontend dependencies
+          command: cd frontend && npm install
+
+      - run:
+          name: Run frontend utility tests (CRA Jest)
+          command: cd frontend && CI=true npm test -- --watchAll=false --passWithNoTests
+
 # =============================================================================
 # WORKFLOWS
-# All five jobs run in PARALLEL to minimise total pipeline duration.
+# All six jobs run in PARALLEL to minimise total pipeline duration.
 # The branch filter ensures this pipeline ONLY triggers on pushes to dev.
 # Pushes to main, feature branches, or any other branch are ignored.
 # =============================================================================
@@ -298,6 +332,12 @@ workflows:
               only: dev
 
       - frontend-checks:
+          filters:
+            branches:
+              only: dev
+
+      # Unit tests - hard fail to protect code correctness
+      - unit-tests:
           filters:
             branches:
               only: dev

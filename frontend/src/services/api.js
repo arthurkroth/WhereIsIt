@@ -87,6 +87,9 @@ export const resetPassword = (token, newPassword) => api.post('/auth/reset-passw
 // PROFILE
 // ============================================================================
 
+// Permanently deletes the authenticated user's account (requires password confirmation).
+export const deleteAccount = (password) => api.delete('/auth/account', { data: { password } });
+
 // Fetches the current user's profile.
 export const getProfile = () => api.get('/auth/profile');
 // Updates the current user's name.
@@ -173,9 +176,9 @@ export const searchAdminUsers = (q = '', role = 'all', status = 'all') =>
   api.get(`/admin/users?q=${encodeURIComponent(q)}&role=${role}&status=${status}`);
 // Fetches a single user's full admin detail record.
 export const getAdminUser = (id) => api.get(`/admin/users/${id}`);
-// Changes a user's FREE/PREMIUM tier.
-export const adminChangeTier = (id, newTier, reason) =>
-  api.put(`/admin/users/${id}/tier`, { newTier, reason });
+// Changes a user's FREE/PREMIUM tier, with optional subscription expiry/permanent flag.
+export const adminChangeTier = (id, newTier, reason, expiresAt = null, permanent = false) =>
+  api.put(`/admin/users/${id}/tier`, { newTier, reason, expiresAt, permanent });
 // Suspends a user account.
 export const adminSuspendAccount = (id, reason) =>
   api.put(`/admin/users/${id}/suspend`, { reason });

@@ -22,13 +22,14 @@ import {
   getProfile, updateProfile, changeEmail, changePassword,
   beginMfaSetup, confirmMfaSetup, disableMfa,
   getPremiumSettings, updatePremiumSettings, sendTestAlert,
-  createSupportTicket, getUserTickets, replyToSupportTicket
+  createSupportTicket, getUserTickets, replyToSupportTicket,
+  deleteAccount
 } from '../services/api';
 import { formatDate } from '../utils/format';
 
 // Profile page with tabs for account details, password, MFA, Premium settings, and support.
 function Profile() {
-  const { user } = useAuth();
+  const { user, logoutUser } = useAuth();
 
   const [profile, setProfile] = useState(null);
   const [loadingProfile, setLoadingProfile] = useState(true);
@@ -81,7 +82,19 @@ function Profile() {
   // Per-ticket reply state: { [ticketId]: { text, loading, error, success } }
   const [replyState, setReplyState] = useState({});
 
+  // Account deletion
+  const [deletePassword, setDeletePassword] = useState('');
+  const [deleteLoading, setDeleteLoading] = useState(false);
+  const [deleteError, setDeleteError] = useState('');
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+
   const isPremium = profile?.role === 'PREMIUM' || user?.role === 'PREMIUM';
+  const isFree = (profile?.role === 'FREE' || user?.role === 'FREE') && user?.role !== 'ADMIN';
+
+  // Controls which tab is active — needs to be state so the Upgrade tab can
+  // navigate the user directly to Contact Support after clicking "I've paid".
+  const [activeTab, setActiveTab] = useState('details');
+  const [selectedPlan, setSelectedPlan] = useState(null);
 
   // Loads the user's profile on mount.
   useEffect(() => { fetchProfile(); }, []);
@@ -325,6 +338,19 @@ function Profile() {
     }
   };
 
+  // Permanently deletes the account after password confirmation.
+  const handleDeleteAccount = async () => {
+    if (!deletePassword) { setDeleteError('Please enter your password to confirm.'); return; }
+    setDeleteLoading(true); setDeleteError('');
+    try {
+      await deleteAccount(deletePassword);
+      logoutUser();
+    } catch (err) {
+      setDeleteError(err.response?.data?.error || 'Failed to delete account. Please try again.');
+      setDeleteLoading(false);
+    }
+  };
+
   // Renders a coloured badge for a ticket's status.
   const getStatusBadge = (status) => {
     if (status === 'open')        return <Badge bg="danger">Open</Badge>;
@@ -367,7 +393,7 @@ function Profile() {
         </div>
       </div>
 
-      <Tab.Container defaultActiveKey="details">
+      <Tab.Container activeKey={activeTab} onSelect={k => setActiveTab(k)}>
         <Nav variant="tabs" className="mb-4">
           <Nav.Item><Nav.Link eventKey="details">Account Details</Nav.Link></Nav.Item>
           <Nav.Item><Nav.Link eventKey="password">Change Password</Nav.Link></Nav.Item>
@@ -383,6 +409,13 @@ function Profile() {
             <Nav.Item>
               <Nav.Link eventKey="premium" onClick={() => !premiumSettings && fetchPremiumSettings()}>
                 <span className="text-warning">★</span> Premium Settings
+              </Nav.Link>
+            </Nav.Item>
+          )}
+          {isFree && (
+            <Nav.Item>
+              <Nav.Link eventKey="upgrade">
+                <span className="text-success">★</span> Upgrade to Premium
               </Nav.Link>
             </Nav.Item>
           )}
@@ -457,6 +490,72 @@ function Profile() {
                 </Card>
               </Col>
             </Row>
+
+            {/* ── Danger zone: account deletion ───────────────────────── */}
+            <Card className="border-danger mt-4">
+              <Card.Header className="bg-danger text-white d-flex justify-content-between align-items-center">
+                <strong>Danger Zone</strong>
+              </Card.Header>
+              <Card.Body>
+                {!showDeleteConfirm ? (
+                  <>
+                    <p className="mb-2">Permanently delete your account and all associated data. <strong>This cannot be undone.</strong></p>
+                    <Button variant="outline-danger" size="sm" onClick={() => setShowDeleteConfirm(true)}>
+                      Delete My Account
+                    </Button>
+                  </>
+                ) : (
+                  <>
+                    <Alert variant="danger">
+                      <strong>Are you absolutely sure?</strong>
+                      <p className="mb-0 mt-1 small">
+                        This will permanently delete your account, all your receipts, files, and data.
+                        This action <strong>cannot be reversed</strong>.
+                      </p>
+                    </Alert>
+                    {deleteError && <Alert variant="danger" dismissible onClose={() => setDeleteError('')}>{deleteError}</Alert>}
+                    <Form.Group className="mb-3">
+                      <Form.Label>Confirm your password</Form.Label>
+                      <Form.Control
+                        type="password"
+                        placeholder="Enter your current password"
+                        value={deletePassword}
+                        onChange={(e) => setDeletePassword(e.target.value)}
+                        disabled={deleteLoading}
+                        autoComplete="current-password"
+                      />
+                    </Form.Group>
+                    <div className="d-flex gap-2">
+                      <Button variant="danger" onClick={handleDeleteAccount} disabled={deleteLoading || !deletePassword}>
+                        {deleteLoading ? <><Spinner as="span" animation="border" size="sm" className="me-2" />Deleting...</> : 'Yes, delete my account'}
+                      </Button>
+                      <Button variant="outline-secondary" onClick={() => { setShowDeleteConfirm(false); setDeletePassword(''); setDeleteError(''); }} disabled={deleteLoading}>
+                        Cancel
+                      </Button>
+                    </div>
+                  </>
+                )}
+              </Card.Body>
+            </Card>
+
+            {/* Premium subscription status — shown to PREMIUM users */}
+            {isPremium && (
+              <Card className="border-warning">
+                <Card.Body className="d-flex align-items-center gap-3 py-2">
+                  <span className="text-warning fs-4">★</span>
+                  <div>
+                    <strong>Premium subscription active</strong>
+                    <div className="text-secondary small">
+                      {profile?.premiumPermanent
+                        ? 'Status: Permanent — no expiry'
+                        : profile?.premiumExpiresAt
+                          ? `Expires: ${formatDate(profile.premiumExpiresAt)}`
+                          : 'No expiry date set'}
+                    </div>
+                  </div>
+                </Card.Body>
+              </Card>
+            )}
           </Tab.Pane>
 
           {/* ── Tab 2: Change Password ──────────────────────────────────── */}
@@ -657,6 +756,134 @@ function Profile() {
                       )}
                     </Card.Body>
                   </Card>
+                </Col>
+              </Row>
+            </Tab.Pane>
+          )}
+
+          {/* ── Upgrade to Premium tab (FREE users only) ───────────────── */}
+          {isFree && (
+            <Tab.Pane eventKey="upgrade">
+              <Row className="justify-content-center">
+                <Col md={10}>
+                  <Alert variant="info" className="mb-4">
+                    <strong>Academic Project Notice:</strong> WhereIsIt? is a final-year college project.
+                    Premium subscriptions are managed manually. Payments are processed via Revolut —
+                    no card details are stored by this application. The service may be discontinued
+                    after the 2025/2026 academic year. Please review our{' '}
+                    <a href="/terms" target="_blank" rel="noopener noreferrer">Terms of Service</a>{' '}
+                    before purchasing.
+                  </Alert>
+
+                  <h5 className="fw-bold mb-4 text-center">Choose your plan</h5>
+
+                  <Row className="g-4 mb-4 justify-content-center">
+                    {/* 1 Month plan */}
+                    <Col md={5}>
+                      <Card
+                        className={`h-100 hover-card ${selectedPlan === '1month' ? 'border-primary' : ''}`}
+                        onClick={() => setSelectedPlan('1month')}
+                        style={{ cursor: 'pointer' }}
+                      >
+                        <Card.Body className="text-center py-4">
+                          {selectedPlan === '1month' && <Badge bg="primary" className="mb-2">Selected</Badge>}
+                          <h5 className="fw-bold mb-1">1 Month</h5>
+                          <div className="display-6 fw-bold text-primary mb-1">€4.99</div>
+                          <div className="text-muted small mb-3">€4.99 / month</div>
+                          <ul className="list-unstyled text-start small">
+                            <li className="mb-1">✓ Unlimited receipt storage</li>
+                            <li className="mb-1">✓ AI-powered OCR (GPT-4o)</li>
+                            <li className="mb-1">✓ Advanced receipt filters</li>
+                            <li className="mb-1">✓ CSV export</li>
+                            <li className="mb-1">✓ Warranty expiry email alerts</li>
+                            <li>✓ Priority support</li>
+                          </ul>
+                        </Card.Body>
+                      </Card>
+                    </Col>
+
+                    {/* 6 Month plan */}
+                    <Col md={5}>
+                      <Card
+                        className={`h-100 hover-card ${selectedPlan === '6months' ? 'border-primary' : ''}`}
+                        onClick={() => setSelectedPlan('6months')}
+                        style={{ cursor: 'pointer', position: 'relative' }}
+                      >
+                        <Badge bg="success" style={{ position: 'absolute', top: '-10px', right: '-10px', fontSize: '0.75rem', padding: '6px 12px' }}>
+                          Best Value
+                        </Badge>
+                        <Card.Body className="text-center py-4">
+                          {selectedPlan === '6months' && <Badge bg="primary" className="mb-2">Selected</Badge>}
+                          <h5 className="fw-bold mb-1">6 Months</h5>
+                          <div className="display-6 fw-bold text-primary mb-1">€24.99</div>
+                          <div className="text-muted small mb-3">€4.16 / month — save 17%</div>
+                          <ul className="list-unstyled text-start small">
+                            <li className="mb-1">✓ Unlimited receipt storage</li>
+                            <li className="mb-1">✓ AI-powered OCR (GPT-4o)</li>
+                            <li className="mb-1">✓ Advanced receipt filters</li>
+                            <li className="mb-1">✓ CSV export</li>
+                            <li className="mb-1">✓ Warranty expiry email alerts</li>
+                            <li>✓ Priority support</li>
+                          </ul>
+                        </Card.Body>
+                      </Card>
+                    </Col>
+                  </Row>
+
+                  {/* Payment section — shown after plan selection */}
+                  {selectedPlan && (
+                    <Card className="mt-2">
+                      <Card.Header className="bg-primary text-white">
+                        <strong>Complete your payment via Revolut</strong>
+                      </Card.Header>
+                      <Card.Body>
+                        <Alert variant="warning" className="mb-4">
+                          <strong>Important:</strong> When making the payment, add your account email
+                          address (<strong>{profile?.email}</strong>) in the payment description /
+                          reference field so we can identify your payment.
+                        </Alert>
+
+                        <Row className="align-items-center g-4">
+                          <Col md={4} className="text-center">
+                            <QRCodeSVG value="https://revolut.me/arthurkroth" size={180} level="H" />
+                            <div className="text-muted small mt-2">Scan with the Revolut app</div>
+                          </Col>
+                          <Col md={8}>
+                            <p className="mb-2"><strong>Selected plan:</strong>{' '}
+                              {selectedPlan === '1month' ? '1 Month — €4.99' : '6 Months — €24.99'}
+                            </p>
+                            <p className="mb-3">
+                              <strong>Or pay via link:</strong>{' '}
+                              <a href="https://revolut.me/arthurkroth" target="_blank" rel="noopener noreferrer">
+                                revolut.me/arthurkroth
+                              </a>
+                            </p>
+                            <p className="text-muted small mb-4">
+                              Once you have completed the payment, click the button below to send
+                              a confirmation to our support team. Your account will be upgraded
+                              manually, typically within 24 hours.
+                            </p>
+                            <Button
+                              variant="success"
+                              onClick={() => {
+                                const planLabel = selectedPlan === '1month' ? '1 Month' : '6 Months';
+                                const planPrice = selectedPlan === '1month' ? '€4.99' : '€24.99';
+                                setSupportForm({
+                                  subject: `Premium Subscription Payment — ${planLabel} Plan`,
+                                  message: `I have sent a payment of ${planPrice} via Revolut for the ${planLabel} Premium plan.\n\nMy account email: ${profile?.email}\n\nPlease activate my Premium subscription. Thank you.`,
+                                  priority: 'medium'
+                                });
+                                setActiveTab('support');
+                                if (tickets.length === 0) fetchTickets();
+                              }}
+                            >
+                              I've sent the payment — notify support
+                            </Button>
+                          </Col>
+                        </Row>
+                      </Card.Body>
+                    </Card>
+                  )}
                 </Col>
               </Row>
             </Tab.Pane>

@@ -49,7 +49,7 @@ function AdminUserDetail() {
   const [showResetMfaModal, setShowResetMfaModal] = useState(false);
 
   // Form state for each modal
-  const [tierForm, setTierForm] = useState({ newTier: 'FREE', reason: '' });
+  const [tierForm, setTierForm] = useState({ newTier: 'FREE', reason: '', expiresAt: '', permanent: false });
   const [suspendForm, setSuspendForm] = useState({ reason: '' });
   const [reactivateForm, setReactivateForm] = useState({ reason: '' });
   const [resetPwForm, setResetPwForm] = useState({ reason: '' });
@@ -78,7 +78,7 @@ function AdminUserDetail() {
   // Clears form state and errors for every action modal.
   const resetModalState = () => {
     setActionError('');
-    setTierForm({ newTier: 'FREE', reason: '' });
+    setTierForm({ newTier: 'FREE', reason: '', expiresAt: '', permanent: false });
     setSuspendForm({ reason: '' });
     setReactivateForm({ reason: '' });
     setResetPwForm({ reason: '' });
@@ -110,7 +110,7 @@ function AdminUserDetail() {
     }
     setActionLoading(true); setActionError('');
     try {
-      await adminChangeTier(id, tierForm.newTier, tierForm.reason);
+      await adminChangeTier(id, tierForm.newTier, tierForm.reason, tierForm.expiresAt || null, tierForm.permanent);
       showSuccess(`User tier changed to ${tierForm.newTier} successfully`);
     } catch (err) {
       setActionError(err.response?.data?.error || 'Failed to change tier');
@@ -252,6 +252,14 @@ function AdminUserDetail() {
                       : <Badge bg="warning" text="dark">Disabled</Badge>}</td></tr>
                   <tr><td className="text-muted">Registered</td><td>{formatDate(user.createdAt)}</td></tr>
                   <tr><td className="text-muted">Receipts</td><td>{user.receiptCount}</td></tr>
+                  {user.role === 'PREMIUM' && (
+                    <tr><td className="text-muted">Premium expires</td>
+                      <td>{user.premiumPermanent
+                        ? <Badge bg="warning" text="dark">Permanent</Badge>
+                        : user.premiumExpiresAt
+                          ? formatDate(user.premiumExpiresAt)
+                          : <span className="text-muted">No expiry set</span>}</td></tr>
+                  )}
                 </tbody>
               </table>
             </Card.Body>
@@ -267,7 +275,7 @@ function AdminUserDetail() {
                 {/* Change Tier — not for admins */}
                 {user.role !== 'ADMIN' && (
                   <Button variant="outline-warning"
-                    onClick={() => { resetModalState(); setTierForm({ newTier: user.role === 'FREE' ? 'PREMIUM' : 'FREE', reason: '' }); setShowTierModal(true); }}>
+                    onClick={() => { resetModalState(); setTierForm({ newTier: user.role === 'FREE' ? 'PREMIUM' : 'FREE', reason: '', expiresAt: '', permanent: false }); setShowTierModal(true); }}>
                     ↕ Change Tier (currently {user.role})
                   </Button>
                 )}
@@ -380,13 +388,39 @@ function AdminUserDetail() {
               <option value="PREMIUM">PREMIUM</option>
             </Form.Select>
           </Form.Group>
-          <Form.Group>
+          <Form.Group className="mb-3">
             <Form.Label>Reason <span className="text-danger">*</span> <small className="text-muted">(min 10 characters)</small></Form.Label>
             <Form.Control as="textarea" rows={3} value={tierForm.reason}
               onChange={(e) => setTierForm(p => ({ ...p, reason: e.target.value }))}
               placeholder="Why is this tier change being made?" />
             <Form.Text className="text-muted">{tierForm.reason.length}/10 minimum</Form.Text>
           </Form.Group>
+
+          {/* Subscription expiry options — only shown when upgrading to PREMIUM */}
+          {tierForm.newTier === 'PREMIUM' && (
+            <>
+              <Form.Group className="mb-2">
+                <Form.Check
+                  type="checkbox"
+                  id="premiumPermanent"
+                  label="Permanently Premium (no expiry date)"
+                  checked={tierForm.permanent}
+                  onChange={(e) => setTierForm(p => ({ ...p, permanent: e.target.checked, expiresAt: e.target.checked ? '' : p.expiresAt }))}
+                />
+              </Form.Group>
+              {!tierForm.permanent && (
+                <Form.Group>
+                  <Form.Label>Subscription expires on <small className="text-muted">(leave blank for open-ended)</small></Form.Label>
+                  <Form.Control
+                    type="date"
+                    value={tierForm.expiresAt}
+                    min={new Date().toISOString().split('T')[0]}
+                    onChange={(e) => setTierForm(p => ({ ...p, expiresAt: e.target.value }))}
+                  />
+                </Form.Group>
+              )}
+            </>
+          )}
         </Modal.Body>
         <Modal.Footer>
           <Button variant="secondary" onClick={handleCloseAll} disabled={actionLoading}>Cancel</Button>

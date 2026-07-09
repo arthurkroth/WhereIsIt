@@ -412,7 +412,7 @@ async function disableMfa(req, res) {
 async function getProfile(req, res) {
   const userId = req.user.userId;
   const [rows] = await db.execute(
-    "SELECT id, email, first_name, last_name, role, mfa_enabled, email_verified, created_at FROM users WHERE id = ?",
+    "SELECT id, email, first_name, last_name, role, mfa_enabled, email_verified, created_at, premium_expires_at, premium_permanent FROM users WHERE id = ?",
     [userId]
   );
   if (rows.length === 0) return res.status(404).json({ error: "User not found" });
@@ -431,7 +431,9 @@ async function getProfile(req, res) {
       mfaEnabled: user.mfa_enabled === 1 || user.mfa_enabled === true,
       emailVerified: user.email_verified === 1 || user.email_verified === true,
       remainingRecoveryCodes: codeRows[0].count,
-      createdAt: user.created_at
+      createdAt: user.created_at,
+      premiumExpiresAt: user.premium_expires_at || null,
+      premiumPermanent: user.premium_permanent === 1 || user.premium_permanent === true
     }
   });
 }
@@ -605,11 +607,47 @@ async function replyToTicket(req, res) {
   return res.json({ success: true, message: 'Your reply has been submitted.' });
 }
 
+/**
+ * DELETE /auth/account
+ * Permanently deletes the authenticated user's account after verifying their
+ * password. Audit log is written before deletion so the event is preserved.
+ * All associated receipts, tickets, MFA codes, and premium settings are
+ * removed via ON DELETE CASCADE on the database foreign keys.
+ */
+async function deleteAccount(req, res) {
+  const userId = req.user.userId;
+  const { password } = req.body;
+
+  if (!password) {
+    return res.status(400).json({ error: 'Password is required to delete your account.' });
+  }
+
+  const [rows] = await db.execute('SELECT email, password_hash, first_name FROM users WHERE id = ?', [userId]);
+  if (rows.length === 0) return res.status(404).json({ error: 'User not found' });
+
+  const user = rows[0];
+  const passwordValid = await bcrypt.compare(password, user.password_hash);
+  if (!passwordValid) {
+    return res.status(401).json({ error: 'Incorrect password. Account not deleted.' });
+  }
+
+  // Write the audit entry BEFORE deletion — once the user row is gone the
+  // user_id FK becomes NULL via ON DELETE SET NULL, preserving the record.
+  try {
+    await audit.log(userId, 'ACCOUNT_DELETED', `User permanently deleted their own account (${user.email})`);
+  } catch {}
+
+  // Delete the account — cascades to receipts, items, MFA codes, tickets, premium settings
+  await db.execute('DELETE FROM users WHERE id = ?', [userId]);
+
+  return res.json({ success: true, message: 'Your account has been permanently deleted.' });
+}
+
 module.exports = {
   register, login, getCaptcha,
   verifyEmail, resendVerification,
   beginMfaSetup, confirmMfaSetup, verifyMfaLogin, disableMfa,
   getProfile, updateProfile, changeEmail, changePassword,
   createSupportTicket, getUserTickets, replyToTicket,
-  allowTriggeredEmail
+  allowTriggeredEmail, deleteAccount
 };

@@ -9,6 +9,7 @@ const { env } = require("./config/env");
 const { dbHealthCheck } = require("./config/db");
 const { startWarrantyAlertService } = require("./services/warrantyAlertService");
 const { startReportScheduler } = require("./services/reportService");
+const { startPremiumExpiryService } = require("./services/premiumExpiryService");
 
 /**
  * Starts the server after verifying DB connectivity.
@@ -27,6 +28,10 @@ async function start() {
     // Start report scheduler cron — runs daily at 01:00 UTC
     // Checks the report_schedule table and generates a report when due
     startReportScheduler();
+
+    // Start premium expiry cron — runs daily at 03:00 UTC
+    // Reverts expired Premium subscriptions to Free and sends warning emails
+    startPremiumExpiryService();
   });
 }
 

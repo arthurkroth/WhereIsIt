@@ -26,13 +26,15 @@ function Terms() {
           <hr className="mb-4" />
 
           {/* Academic Notice */}
-          <div className="alert alert-info mb-4">
-            <strong>Academic Project Notice</strong>
+          <div className="alert alert-warning mb-4">
+            <strong>⚠ Academic Project Notice — Service Discontinuation Risk</strong>
             <p className="mb-0 mt-1">
               WhereIsIt? is an academic project developed as part of a BSc (Honours) in
               Computing - Cybersecurity at National College of Ireland. This application is
-              intended for demonstration and evaluation purposes only and is not a commercial
-              product or service.
+              provided for demonstration and evaluation purposes. <strong>The service may be
+              discontinued at any time, particularly after the conclusion of the 2025/2026
+              academic year.</strong> If you choose to purchase a Premium subscription, please
+              be aware of this risk before committing to any plan.
             </p>
           </div>
 
@@ -100,6 +102,47 @@ function Terms() {
               receipts until existing receipts are deleted. A Premium tier with unlimited
               storage may be made available in the future.
             </p>
+          </section>
+
+          <section className="mb-4">
+            <h4>5a. Payments and Subscriptions</h4>
+            <p>
+              WhereIsIt? offers a Premium tier subscription for enhanced features. The following
+              terms apply to all Premium subscription purchases:
+            </p>
+            <ul>
+              <li>
+                <strong>Payment processing:</strong> Payments are processed exclusively via
+                Revolut, a regulated third-party payment service. WhereIsIt? does not store,
+                process, or have access to any payment card details, Revolut account information,
+                or transaction identifiers. Payment confirmation is received only through
+                a user-submitted support ticket.
+              </li>
+              <li>
+                <strong>Manual activation:</strong> Premium access is activated manually by an
+                administrator after payment confirmation. There is no automated payment processing.
+                Activation typically occurs within 24 hours of receiving a confirmed support ticket.
+              </li>
+              <li>
+                <strong>Service continuity:</strong> WhereIsIt? is an academic project and may be
+                discontinued at any time, particularly after the conclusion of the 2025/2026
+                academic year at National College of Ireland. WhereIsIt? makes no guarantee of
+                service continuity beyond this period. Users are strongly advised not to purchase
+                subscriptions that extend significantly beyond this date.
+              </li>
+              <li>
+                <strong>No refunds:</strong> No refunds are issued once Premium access has been
+                activated and the subscription period has commenced. If the service is discontinued
+                before the end of a purchased subscription period, WhereIsIt? will make reasonable
+                efforts to notify users but cannot guarantee prorated refunds.
+              </li>
+              <li>
+                <strong>Data retention after expiry:</strong> When a Premium subscription expires,
+                the account reverts to the Free tier. All stored receipts are retained; however,
+                uploading additional receipts is restricted if the total count exceeds the 10-receipt
+                Free tier limit.
+              </li>
+            </ul>
           </section>
 
           <section className="mb-4">
