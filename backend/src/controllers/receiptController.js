@@ -169,9 +169,10 @@ async function uploadReceipt(req, res) {
 
     try {
       await db.execute(
-        "INSERT INTO audit_logs (user_id, action, details) VALUES (?, ?, ?)",
+        "INSERT INTO audit_logs (user_id, action, details, ip_address) VALUES (?, ?, ?, ?)",
         [userId, 'RECEIPT_UPLOADED',
-         `Receipt ${receiptId} uploaded via ${usedOpenAI ? 'OpenAI' : 'Tesseract'} OCR. Confidence: ${extractedData.confidence}`]
+         `Receipt ${receiptId} uploaded via ${usedOpenAI ? 'OpenAI' : 'Tesseract'} OCR. Confidence: ${extractedData.confidence}`,
+         req.ip]
       );
     } catch (err) { console.log('Audit log skipped:', err.message); }
 
@@ -251,8 +252,8 @@ async function createManualReceipt(req, res) {
 
     try {
       await db.execute(
-        "INSERT INTO audit_logs (user_id, action, details) VALUES (?, ?, ?)",
-        [userId, 'RECEIPT_MANUAL_ENTRY', `Manual receipt ${receiptId} created with ${items.length} item(s)`]
+        "INSERT INTO audit_logs (user_id, action, details, ip_address) VALUES (?, ?, ?, ?)",
+        [userId, 'RECEIPT_MANUAL_ENTRY', `Manual receipt ${receiptId} created with ${items.length} item(s)`, req.ip]
       );
     } catch (err) { console.log('Audit log skipped:', err.message); }
 
@@ -394,8 +395,8 @@ async function updateReceipt(req, res) {
     }
 
     try {
-      await db.execute("INSERT INTO audit_logs (user_id, action, details) VALUES (?, ?, ?)",
-        [userId, 'RECEIPT_UPDATED', `Receipt ${req.params.id} updated`]);
+      await db.execute("INSERT INTO audit_logs (user_id, action, details, ip_address) VALUES (?, ?, ?, ?)",
+        [userId, 'RECEIPT_UPDATED', `Receipt ${req.params.id} updated`, req.ip]);
     } catch {}
 
     return res.json({ success: true, message: 'Receipt updated successfully' });
@@ -419,8 +420,8 @@ async function deleteReceipt(req, res) {
     }
 
     try {
-      await db.execute("INSERT INTO audit_logs (user_id, action, details) VALUES (?, ?, ?)",
-        [userId, 'RECEIPT_DELETED', `Receipt ${req.params.id} deleted`]);
+      await db.execute("INSERT INTO audit_logs (user_id, action, details, ip_address) VALUES (?, ?, ?, ?)",
+        [userId, 'RECEIPT_DELETED', `Receipt ${req.params.id} deleted`, req.ip]);
     } catch {}
 
     return res.json({ success: true, message: 'Receipt deleted successfully' });

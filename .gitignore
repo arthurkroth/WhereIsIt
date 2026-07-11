@@ -15,3 +15,9 @@ Thumbs.db
 
 # Reports
 backend/reports/
+
+# Test coverage output (auto-generated, not source code)
+backend/coverage/
+
+# React production build (rebuilt on each deploy, not source code)
+frontend/build/

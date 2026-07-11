@@ -118,8 +118,8 @@ async function updateSettings(req, res) {
 
   try {
     await db.execute(
-      "INSERT INTO audit_logs (user_id, action, details) VALUES (?, ?, ?)",
-      [userId, 'PREMIUM_SETTINGS_UPDATED', 'User updated warranty alert preferences']
+      "INSERT INTO audit_logs (user_id, action, details, ip_address) VALUES (?, ?, ?, ?)",
+      [userId, 'PREMIUM_SETTINGS_UPDATED', 'User updated warranty alert preferences', req.ip]
     );
   } catch (err) {
     console.log('Audit log skipped:', err.message);
@@ -216,8 +216,8 @@ async function exportCsv(req, res) {
   // Log the export action
   try {
     await db.execute(
-      "INSERT INTO audit_logs (user_id, action, details) VALUES (?, ?, ?)",
-      [userId, 'RECEIPT_CSV_EXPORTED', `Exported ${receipts.length} receipts to CSV`]
+      "INSERT INTO audit_logs (user_id, action, details, ip_address) VALUES (?, ?, ?, ?)",
+      [userId, 'RECEIPT_CSV_EXPORTED', `Exported ${receipts.length} receipts to CSV`, req.ip]
     );
   } catch (err) {
     console.log('Audit log skipped:', err.message);

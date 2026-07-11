@@ -76,8 +76,8 @@ authRoutes.post("/forgot-password", async (req, res) => {
 
     try {
       await db.execute(
-        "INSERT INTO audit_logs (user_id, action, details) VALUES (?, ?, ?)",
-        [user.id, "FORGOT_PASSWORD_REQUESTED", "Password reset requested"]
+        "INSERT INTO audit_logs (user_id, action, details, ip_address) VALUES (?, ?, ?, ?)",
+        [user.id, "FORGOT_PASSWORD_REQUESTED", "Password reset requested", req.ip]
       );
     } catch (err) { console.log('Audit log skipped:', err.message); }
 
@@ -133,8 +133,8 @@ authRoutes.post("/reset-password", async (req, res) => {
 
     try {
       await db.execute(
-        "INSERT INTO audit_logs (user_id, action, details) VALUES (?, ?, ?)",
-        [rows[0].id, "PASSWORD_RESET_SUCCESS", "Password reset successfully"]
+        "INSERT INTO audit_logs (user_id, action, details, ip_address) VALUES (?, ?, ?, ?)",
+        [rows[0].id, "PASSWORD_RESET_SUCCESS", "Password reset successfully", req.ip]
       );
     } catch (err) { console.log('Audit log skipped:', err.message); }
 
