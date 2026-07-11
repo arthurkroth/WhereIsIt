@@ -315,7 +315,7 @@ function ReceiptUpload() {
                 </Form.Group>
 
                 <Row className="mb-3">
-                  <Col md={6}>
+                  <Col md={4}>
                     <Form.Group>
                       <Form.Label>Purchase Date <span className="text-danger">*</span></Form.Label>
                       <Form.Control type="date" value={reviewHeader.purchaseDate}
@@ -323,11 +323,19 @@ function ReceiptUpload() {
                         disabled={saving || saveSuccess} />
                     </Form.Group>
                   </Col>
-                  <Col md={6}>
+                  <Col md={4}>
                     <Form.Group>
                       <Form.Label>Total Price (€)</Form.Label>
                       <Form.Control type="number" step="0.01" min="0" value={reviewHeader.totalPrice}
                         onChange={(e) => handleHeaderChange('totalPrice', e.target.value)}
+                        disabled={saving || saveSuccess} />
+                    </Form.Group>
+                  </Col>
+                  <Col md={4}>
+                    <Form.Group>
+                      <Form.Label>Warranty (months)</Form.Label>
+                      <Form.Control type="number" min="0" max="120" value={reviewHeader.warrantyMonths}
+                        onChange={(e) => handleHeaderChange('warrantyMonths', e.target.value)}
                         disabled={saving || saveSuccess} />
                     </Form.Group>
                   </Col>

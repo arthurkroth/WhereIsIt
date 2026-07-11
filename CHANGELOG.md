@@ -1,5 +1,33 @@
 # Changelog
 
+## [0.8.1] - 11/07/2026 - Bug fixes and UI improvement.
+
+### Fixed
+
+#### Account Deletion — Wrong Password Causing Unintended Logout
+- `deleteAccount` in `authController.js` returned HTTP `401` when the password confirmation was incorrect. The axios response interceptor in `api.js` treats any `401` from a non-login endpoint as an expired session and immediately clears the token and redirects to `/login`, so entering a wrong password was silently logging the user out instead of showing an error. Changed status code to `403` so the interceptor ignores it and the error reaches the frontend handler correctly
+- `handleDeleteAccount` in `Profile.js` now calls `setDeletePassword('')` in the catch block, clearing the password field after a failed attempt so the user can type again without manually clearing it
+
+#### Audit Log IP Addresses Not Being Recorded
+- All audit log entries created via `AuditLogService.log()` were silently storing `NULL` for `ip_address` because the method had no IP parameter and used a 3-column INSERT. Only `adminController.js` (which used inline INSERT statements directly) was capturing IP addresses. Fixed by:
+  - `AuditLogService.log()` updated to accept an optional fourth `ip` parameter; INSERT changed to include `ip_address` column
+  - All 19 `audit.log()` call sites in `authController.js` updated to pass `req.ip` (covers REGISTER, EMAIL_VERIFIED, LOGIN_ATTEMPT, LOGIN_SUCCESS, ACCOUNT_LOCKED, MFA setup/confirm/disable, profile/email/password changes, support tickets, account deletion)
+  - Inline INSERT statements in `authRoutes.js` (FORGOT_PASSWORD_REQUESTED, PASSWORD_RESET_SUCCESS), `receiptController.js` (RECEIPT_UPLOADED, RECEIPT_MANUAL_ENTRY, RECEIPT_UPDATED, RECEIPT_DELETED), and `premiumController.js` (PREMIUM_SETTINGS_UPDATED, RECEIPT_CSV_EXPORTED) updated to include `ip_address`
+  - Cron-triggered entries in `warrantyAlertService.js` and `premiumExpiryService.js` correctly have no IP (no HTTP request context)
+  - `app.set('trust proxy', 1)` is already in place, so `req.ip` correctly resolves the real client IP from the `X-Forwarded-For` header behind the nginx reverse proxy on AWS
+
+#### Missing Warranty Field in OCR Upload Review
+- The "Warranty (months)" field was extracted by OCR and sent correctly on save, but was never rendered in the upload review form — users had no way to see or correct the extracted value before saving. The two-column layout row (Purchase Date, Total Price) was changed to three columns (Purchase Date, Total Price, Warranty months), adding a number input (`min="0"` `max="120"`) bound to `reviewHeader.warrantyMonths`
+
+### Changed
+
+#### Profile Page — Premium Status Banner
+- Premium subscription status moved from a card at the bottom of the Account Details tab to a slim persistent banner between the tab navigation and all tab content. The banner is now visible regardless of which profile tab is active, and shows the expiry date (or "Permanent — no expiry") on the right-hand side
+
+#### Profile Page — Danger Zone Redesign
+- Danger Zone removed from the Account Details tab body and replaced with a fixed bottom drawer anchored to the bottom of the viewport (respects the `--sidebar-width` CSS variable so it does not overlap the sidebar). Collapsed by default — shows only a thin `⚠ Danger Zone` bar. Clicking the bar slides the deletion form up with a CSS `max-height` transition. Closing the drawer resets the confirmation state, so it always starts fresh on next open. Confirmation form layout updated to an inline row (password field + action buttons side by side) to fit the compact drawer format
+
+
 ## [0.8.0] - 06/07/2026 - Unit testing, security hardening, Premium subscription flow, and submission polish.
 
 ### Added

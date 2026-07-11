@@ -24,10 +24,10 @@ class AuditLogService {
    * @param {string} details - Additional details about the action
    * @returns {Promise<void>}
    */
-  async log(userId, action, details) {
+  async log(userId, action, details, ip = null) {
     await db.execute(
-      "INSERT INTO audit_logs (user_id, action, details) VALUES (?, ?, ?)",
-      [userId, action, details]
+      "INSERT INTO audit_logs (user_id, action, details, ip_address) VALUES (?, ?, ?, ?)",
+      [userId, action, details, ip]
     );
   }
 }

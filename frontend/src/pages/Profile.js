@@ -87,6 +87,7 @@ function Profile() {
   const [deleteLoading, setDeleteLoading] = useState(false);
   const [deleteError, setDeleteError] = useState('');
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [dangerZoneOpen, setDangerZoneOpen] = useState(false);
 
   const isPremium = profile?.role === 'PREMIUM' || user?.role === 'PREMIUM';
   const isFree = (profile?.role === 'FREE' || user?.role === 'FREE') && user?.role !== 'ADMIN';
@@ -347,6 +348,7 @@ function Profile() {
       logoutUser();
     } catch (err) {
       setDeleteError(err.response?.data?.error || 'Failed to delete account. Please try again.');
+      setDeletePassword('');
       setDeleteLoading(false);
     }
   };
@@ -426,6 +428,26 @@ function Profile() {
           </Nav.Item>
         </Nav>
 
+        {/* Premium status banner — sits between the tab nav and all tab content */}
+        {isPremium && (
+          <div style={{
+            display: 'flex', alignItems: 'center', gap: 10,
+            padding: '8px 14px', marginBottom: 20,
+            background: '#fffbeb', border: '1px solid #d4a017', borderRadius: 8,
+            fontSize: '0.875rem',
+          }}>
+            <span style={{ color: '#d4a017' }}>★</span>
+            <span style={{ fontWeight: 500, color: '#92610a' }}>Premium subscription active</span>
+            <span style={{ marginLeft: 'auto', color: '#78716c' }}>
+              {profile?.premiumPermanent
+                ? 'Permanent — no expiry'
+                : profile?.premiumExpiresAt
+                  ? `Expires ${formatDate(profile.premiumExpiresAt)}`
+                  : ''}
+            </span>
+          </div>
+        )}
+
         <Tab.Content>
 
           {/* ── Tab 1: Account Details ──────────────────────────────────── */}
@@ -491,71 +513,6 @@ function Profile() {
               </Col>
             </Row>
 
-            {/* ── Danger zone: account deletion ───────────────────────── */}
-            <Card className="border-danger mt-4">
-              <Card.Header className="bg-danger text-white d-flex justify-content-between align-items-center">
-                <strong>Danger Zone</strong>
-              </Card.Header>
-              <Card.Body>
-                {!showDeleteConfirm ? (
-                  <>
-                    <p className="mb-2">Permanently delete your account and all associated data. <strong>This cannot be undone.</strong></p>
-                    <Button variant="outline-danger" size="sm" onClick={() => setShowDeleteConfirm(true)}>
-                      Delete My Account
-                    </Button>
-                  </>
-                ) : (
-                  <>
-                    <Alert variant="danger">
-                      <strong>Are you absolutely sure?</strong>
-                      <p className="mb-0 mt-1 small">
-                        This will permanently delete your account, all your receipts, files, and data.
-                        This action <strong>cannot be reversed</strong>.
-                      </p>
-                    </Alert>
-                    {deleteError && <Alert variant="danger" dismissible onClose={() => setDeleteError('')}>{deleteError}</Alert>}
-                    <Form.Group className="mb-3">
-                      <Form.Label>Confirm your password</Form.Label>
-                      <Form.Control
-                        type="password"
-                        placeholder="Enter your current password"
-                        value={deletePassword}
-                        onChange={(e) => setDeletePassword(e.target.value)}
-                        disabled={deleteLoading}
-                        autoComplete="current-password"
-                      />
-                    </Form.Group>
-                    <div className="d-flex gap-2">
-                      <Button variant="danger" onClick={handleDeleteAccount} disabled={deleteLoading || !deletePassword}>
-                        {deleteLoading ? <><Spinner as="span" animation="border" size="sm" className="me-2" />Deleting...</> : 'Yes, delete my account'}
-                      </Button>
-                      <Button variant="outline-secondary" onClick={() => { setShowDeleteConfirm(false); setDeletePassword(''); setDeleteError(''); }} disabled={deleteLoading}>
-                        Cancel
-                      </Button>
-                    </div>
-                  </>
-                )}
-              </Card.Body>
-            </Card>
-
-            {/* Premium subscription status — shown to PREMIUM users */}
-            {isPremium && (
-              <Card className="border-warning">
-                <Card.Body className="d-flex align-items-center gap-3 py-2">
-                  <span className="text-warning fs-4">★</span>
-                  <div>
-                    <strong>Premium subscription active</strong>
-                    <div className="text-secondary small">
-                      {profile?.premiumPermanent
-                        ? 'Status: Permanent — no expiry'
-                        : profile?.premiumExpiresAt
-                          ? `Expires: ${formatDate(profile.premiumExpiresAt)}`
-                          : 'No expiry date set'}
-                    </div>
-                  </div>
-                </Card.Body>
-              </Card>
-            )}
           </Tab.Pane>
 
           {/* ── Tab 2: Change Password ──────────────────────────────────── */}
@@ -1059,6 +1016,107 @@ function Profile() {
           <Button variant="primary" onClick={() => setShowRecoveryModal(false)}>I have saved my recovery codes</Button>
         </Modal.Footer>
       </Modal>
+
+      {/* Extra space so the fixed danger bar never covers page content */}
+      <div style={{ height: 52 }} />
+
+      {/* ── Danger Zone — fixed bottom drawer ─────────────────────────── */}
+      <div style={{
+        position: 'fixed', bottom: 0,
+        left: 'var(--sidebar-width)', right: 0,
+        zIndex: 200,
+        background: '#fff',
+        borderTop: '2px solid #dc3545',
+        boxShadow: '0 -2px 16px rgba(220,53,69,0.1)',
+      }}>
+        {/* Toggle bar */}
+        <div
+          role="button"
+          onClick={() => {
+            if (dangerZoneOpen) {
+              setDangerZoneOpen(false);
+              setShowDeleteConfirm(false);
+              setDeletePassword('');
+              setDeleteError('');
+            } else {
+              setDangerZoneOpen(true);
+            }
+          }}
+          style={{
+            display: 'flex', alignItems: 'center', justifyContent: 'space-between',
+            padding: '12px 28px', cursor: 'pointer', userSelect: 'none',
+          }}
+        >
+          <span style={{ fontWeight: 600, color: '#dc3545', fontSize: '0.9rem', letterSpacing: '0.01em' }}>
+            ⚠ Danger Zone
+          </span>
+          <span style={{
+            color: '#dc3545', fontSize: '0.7rem',
+            display: 'inline-block',
+            transition: 'transform 0.3s ease',
+            transform: dangerZoneOpen ? 'rotate(0deg)' : 'rotate(180deg)',
+          }}>▲</span>
+        </div>
+
+        {/* Expandable form — slides up */}
+        <div style={{
+          maxHeight: dangerZoneOpen ? '420px' : 0,
+          overflow: 'hidden',
+          transition: 'max-height 0.35s ease-out',
+        }}>
+          <div style={{ padding: '4px 28px 24px', borderTop: '1px solid #fce4e4' }}>
+            {!showDeleteConfirm ? (
+              <>
+                <p className="mb-3 mt-3 text-muted small">
+                  Permanently delete your account and all associated data. <strong className="text-danger">This cannot be undone.</strong>
+                </p>
+                <Button variant="outline-danger" size="sm" onClick={() => setShowDeleteConfirm(true)}>
+                  Delete My Account
+                </Button>
+              </>
+            ) : (
+              <>
+                <Alert variant="danger" className="mt-3 mb-3">
+                  <strong>Are you absolutely sure?</strong>
+                  <p className="mb-0 mt-1 small">
+                    This will permanently delete your account, all receipts, files, and data.
+                    This action <strong>cannot be reversed</strong>.
+                  </p>
+                </Alert>
+                {deleteError && (
+                  <Alert variant="danger" dismissible onClose={() => setDeleteError('')}>{deleteError}</Alert>
+                )}
+                <div className="d-flex align-items-end gap-3 flex-wrap">
+                  <Form.Group style={{ minWidth: 260 }}>
+                    <Form.Label className="small mb-1">Confirm your password</Form.Label>
+                    <Form.Control
+                      type="password"
+                      placeholder="Enter your current password"
+                      value={deletePassword}
+                      onChange={(e) => setDeletePassword(e.target.value)}
+                      disabled={deleteLoading}
+                      autoComplete="current-password"
+                      size="sm"
+                    />
+                  </Form.Group>
+                  <div className="d-flex gap-2">
+                    <Button variant="danger" size="sm" onClick={handleDeleteAccount} disabled={deleteLoading || !deletePassword}>
+                      {deleteLoading
+                        ? <><Spinner as="span" animation="border" size="sm" className="me-1" />Deleting...</>
+                        : 'Yes, delete my account'}
+                    </Button>
+                    <Button variant="outline-secondary" size="sm"
+                      onClick={() => { setShowDeleteConfirm(false); setDeletePassword(''); setDeleteError(''); }}
+                      disabled={deleteLoading}>
+                      Cancel
+                    </Button>
+                  </div>
+                </div>
+              </>
+            )}
+          </div>
+        </div>
+      </div>
     </Container>
   );
 }

@@ -162,7 +162,7 @@ async function register(req, res) {
     console.error('Failed to send verification email:', err.message);
   }
 
-  await audit.log(userId, "REGISTER", `User registered with role ${role}`);
+  await audit.log(userId, "REGISTER", `User registered with role ${role}`, req.ip);
 
   return res.status(201).json({
     userId,
@@ -190,7 +190,7 @@ async function verifyEmail(req, res) {
        email_verification_token = NULL, email_verification_expires = NULL WHERE id = ?`,
       [rows[0].id]
     );
-    try { await audit.log(rows[0].id, "EMAIL_VERIFIED", "User verified their email address"); } catch {}
+    try { await audit.log(rows[0].id, "EMAIL_VERIFIED", "User verified their email address", req.ip); } catch {}
     return res.json({ success: true, alreadyVerified: false, message: 'Email verified successfully. You can now log in.' });
   }
 
@@ -219,9 +219,9 @@ async function resendVerification(req, res) {
       const user = rows[0];
       if (allowTriggeredEmail(user.email)) {
         await sendVerificationEmail(user.id, user.email, user.first_name);
-        try { await audit.log(user.id, "VERIFICATION_EMAIL_RESENT", "Verification email resent"); } catch {}
+        try { await audit.log(user.id, "VERIFICATION_EMAIL_RESENT", "Verification email resent", req.ip); } catch {}
       } else {
-        try { await audit.log(user.id, "VERIFICATION_EMAIL_RATE_LIMITED", "Resend verification throttled"); } catch {}
+        try { await audit.log(user.id, "VERIFICATION_EMAIL_RATE_LIMITED", "Resend verification throttled", req.ip); } catch {}
       }
     }
   } catch (err) {
@@ -239,7 +239,7 @@ async function login(req, res) {
   // Reject immediately if the account is currently locked out
   if (attempts.lockedUntil && attempts.lockedUntil > Date.now()) {
     const minutesLeft = Math.ceil((attempts.lockedUntil - Date.now()) / 60000);
-    await audit.log(null, "ACCOUNT_LOCKED_ATTEMPT", `Login attempted on locked account: ${parsed.email}`);
+    await audit.log(null, "ACCOUNT_LOCKED_ATTEMPT", `Login attempted on locked account: ${parsed.email}`, req.ip);
     return res.status(403).json({
       error: `Account temporarily locked due to repeated failed attempts. Try again in ${minutesLeft} minute(s).`,
       accountLocked: true
@@ -275,7 +275,7 @@ async function login(req, res) {
       const lockoutMs = isAdmin ? ADMIN_LOCKOUT_MS : USER_LOCKOUT_MS;
       updated.lockedUntil = Date.now() + lockoutMs;
 
-      await audit.log(null, "ACCOUNT_LOCKED", `Account ${parsed.email} locked for ${lockoutMs / 60000} minutes after ${newCount} failed attempts`);
+      await audit.log(null, "ACCOUNT_LOCKED", `Account ${parsed.email} locked for ${lockoutMs / 60000} minutes after ${newCount} failed attempts`, req.ip);
       if (isAdmin) {
         notifyAdminsOfLockout(parsed.email).catch(err => console.error('notifyAdminsOfLockout failed:', err.message));
       }
@@ -308,7 +308,7 @@ async function login(req, res) {
   }
 
   const needsMfa = await authService.requiresMfa(user.id);
-  await audit.log(user.id, "LOGIN_ATTEMPT", `MFA enabled: ${needsMfa}`);
+  await audit.log(user.id, "LOGIN_ATTEMPT", `MFA enabled: ${needsMfa}`, req.ip);
 
   if (needsMfa) return res.json({ mfaRequired: true, userId: user.id });
 
@@ -327,7 +327,7 @@ async function login(req, res) {
 async function beginMfaSetup(req, res) {
   const user = req.user;
   const setup = await authService.beginMfaSetup(user.userId);
-  await audit.log(user.userId, "MFA_BEGIN", "MFA setup started");
+  await audit.log(user.userId, "MFA_BEGIN", "MFA setup started", req.ip);
   res.json({ otpauthUrl: setup.otpauthUrl });
 }
 
@@ -336,11 +336,11 @@ async function confirmMfaSetup(req, res) {
   const parsed = verifyMfaSchema.parse(req.body);
   const ok = await authService.confirmMfa(user.userId, parsed.token);
   if (!ok) {
-    await audit.log(user.userId, "MFA_CONFIRM_FAILED", "Invalid TOTP code during MFA setup");
+    await audit.log(user.userId, "MFA_CONFIRM_FAILED", "Invalid TOTP code during MFA setup", req.ip);
     return res.json({ success: false });
   }
   const recoveryCodes = await createRecoveryCodes(user.userId);
-  await audit.log(user.userId, "MFA_CONFIRM", "MFA setup confirmed, recovery codes generated");
+  await audit.log(user.userId, "MFA_CONFIRM", "MFA setup confirmed, recovery codes generated", req.ip);
   return res.json({ success: true, recoveryCodes });
 }
 
@@ -377,7 +377,7 @@ async function verifyMfaLogin(req, res) {
     const updated = { count: newCount };
     if (newCount >= MFA_COOLDOWN_THRESHOLD) {
       updated.cooldownUntil = Date.now() + MFA_COOLDOWN_MS;
-      await audit.log(parsed.userId, "MFA_LOGIN_LOCKED", `MFA cooldown triggered after ${newCount} failed attempts`);
+      await audit.log(parsed.userId, "MFA_LOGIN_LOCKED", `MFA cooldown triggered after ${newCount} failed attempts`, req.ip);
     }
     mfaFailedAttempts.set(parsed.userId, updated);
     return res.status(401).json({ error: "Invalid MFA token" });
@@ -393,7 +393,7 @@ async function verifyMfaLogin(req, res) {
     firstName: userRow.first_name, lastName: userRow.last_name
   });
 
-  await audit.log(parsed.userId, "LOGIN_SUCCESS", usedRecoveryCode ? "MFA login via recovery code" : "MFA login success");
+  await audit.log(parsed.userId, "LOGIN_SUCCESS", usedRecoveryCode ? "MFA login via recovery code" : "MFA login success", req.ip);
   res.json({ token });
 }
 
@@ -401,7 +401,7 @@ async function disableMfa(req, res) {
   const userId = req.user.userId;
   await db.execute("UPDATE users SET mfa_enabled = FALSE, mfa_secret = NULL WHERE id = ?", [userId]);
   await db.execute('DELETE FROM mfa_recovery_codes WHERE user_id = ?', [userId]);
-  try { await audit.log(userId, "MFA_DISABLED", "User disabled MFA from profile page"); } catch {}
+  try { await audit.log(userId, "MFA_DISABLED", "User disabled MFA from profile page", req.ip); } catch {}
   return res.json({ success: true, message: "MFA has been disabled" });
 }
 
@@ -447,7 +447,7 @@ async function updateProfile(req, res) {
     "UPDATE users SET first_name = ?, last_name = ? WHERE id = ?",
     [firstName.trim().substring(0, 50), lastName.trim().substring(0, 50), userId]
   );
-  try { await audit.log(userId, "PROFILE_UPDATED", "User updated their name"); } catch {}
+  try { await audit.log(userId, "PROFILE_UPDATED", "User updated their name", req.ip); } catch {}
   return res.json({ success: true, message: "Profile updated successfully" });
 }
 
@@ -475,7 +475,7 @@ async function changeEmail(req, res) {
   try { await sendVerificationEmail(userId, cleanEmail, userRows[0].first_name); }
   catch (err) { console.error('Failed to send verification email after email change:', err.message); }
 
-  try { await audit.log(userId, "EMAIL_CHANGED", `Email changed to ${cleanEmail}`); } catch {}
+  try { await audit.log(userId, "EMAIL_CHANGED", `Email changed to ${cleanEmail}`, req.ip); } catch {}
   return res.json({ success: true, message: "Email updated. Please check your new inbox to verify your address." });
 }
 
@@ -498,7 +498,7 @@ async function changePassword(req, res) {
   const newPasswordHash = await bcrypt.hash(newPassword, 12);
   await db.execute("UPDATE users SET password_hash = ? WHERE id = ?", [newPasswordHash, userId]);
 
-  try { await audit.log(userId, "PASSWORD_CHANGED", "User changed their password"); } catch {}
+  try { await audit.log(userId, "PASSWORD_CHANGED", "User changed their password", req.ip); } catch {}
   return res.json({ success: true, message: "Password changed successfully" });
 }
 
@@ -529,7 +529,7 @@ async function createSupportTicket(req, res) {
     [userId, subject.trim().substring(0, 200), message.trim(), cleanPriority]
   );
 
-  try { await audit.log(userId, 'SUPPORT_TICKET_CREATED', `User submitted ticket #${result.insertId}: "${subject.trim()}"`); } catch {}
+  try { await audit.log(userId, 'SUPPORT_TICKET_CREATED', `User submitted ticket #${result.insertId}: "${subject.trim()}"`, req.ip); } catch {}
 
   return res.status(201).json({
     success: true,
@@ -602,7 +602,7 @@ async function replyToTicket(req, res) {
     [reply.trim(), id, userId]
   );
 
-  try { await audit.log(userId, 'SUPPORT_TICKET_REPLIED', `User replied to ticket #${id}`); } catch {}
+  try { await audit.log(userId, 'SUPPORT_TICKET_REPLIED', `User replied to ticket #${id}`, req.ip); } catch {}
 
   return res.json({ success: true, message: 'Your reply has been submitted.' });
 }
@@ -628,13 +628,13 @@ async function deleteAccount(req, res) {
   const user = rows[0];
   const passwordValid = await bcrypt.compare(password, user.password_hash);
   if (!passwordValid) {
-    return res.status(401).json({ error: 'Incorrect password. Account not deleted.' });
+    return res.status(403).json({ error: 'Incorrect password. Account not deleted.' });
   }
 
   // Write the audit entry BEFORE deletion — once the user row is gone the
   // user_id FK becomes NULL via ON DELETE SET NULL, preserving the record.
   try {
-    await audit.log(userId, 'ACCOUNT_DELETED', `User permanently deleted their own account (${user.email})`);
+    await audit.log(userId, 'ACCOUNT_DELETED', `User permanently deleted their own account (${user.email})`, req.ip);
   } catch {}
 
   // Delete the account — cascades to receipts, items, MFA codes, tickets, premium settings
