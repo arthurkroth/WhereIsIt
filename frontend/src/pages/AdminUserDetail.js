@@ -329,8 +329,14 @@ function AdminUserDetail() {
                   <tbody>
                     {user.recentLogins.map((login, i) => (
                       <tr key={i}>
-                        <td><Badge bg={login.action === 'LOGIN_SUCCESS' ? 'success' : 'danger'} style={{ fontSize: '0.65rem' }}>
-                          {login.action === 'LOGIN_SUCCESS' ? 'Success' : 'Failed'}</Badge></td>
+                        <td><Badge bg={
+                            login.action === 'LOGIN_SUCCESS' ? 'success' :
+                            login.action === 'MFA_LOGIN_LOCKED' ? 'warning' : 'danger'
+                          } style={{ fontSize: '0.65rem' }}>
+                          {login.action === 'LOGIN_SUCCESS' ? 'Success' :
+                           login.action === 'ACCOUNT_LOCKED' ? 'Locked' :
+                           login.action === 'MFA_LOGIN_LOCKED' ? 'MFA Locked' : 'Failed'}
+                        </Badge></td>
                         <td><small className="text-muted font-monospace">{login.ip_address || '—'}</small></td>
                         <td><small className="text-muted">{formatDateTime(login.created_at)}</small></td>
                       </tr>
