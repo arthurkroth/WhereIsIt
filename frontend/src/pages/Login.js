@@ -113,6 +113,8 @@ const Login = () => {
         setShowUnverified(true);
         setUnverifiedEmail(responseData.email || email);
         setError('');
+      } else if (responseData?.accountSuspended) {
+        setError(responseData.error || 'Your account has been suspended. Please contact support.');
       } else {
         setError('Invalid email or password');
 

@@ -114,7 +114,7 @@ async function getUserById(req, res) {
   const user = userRows[0];
   const [receiptCount] = await db.execute('SELECT COUNT(*) AS count FROM receipts WHERE user_id = ?', [id]);
   const [codeCount] = await db.execute('SELECT COUNT(*) AS count FROM mfa_recovery_codes WHERE user_id = ? AND used = FALSE', [id]);
-  const [recentLogins] = await db.execute(`SELECT created_at, action, details, ip_address FROM audit_logs WHERE user_id = ? AND action IN ('LOGIN_SUCCESS', 'LOGIN_ATTEMPT') ORDER BY created_at DESC LIMIT 10`, [id]);
+  const [recentLogins] = await db.execute(`SELECT created_at, action, details, ip_address FROM audit_logs WHERE user_id = ? AND action IN ('LOGIN_SUCCESS', 'ACCOUNT_LOCKED', 'MFA_LOGIN_LOCKED') ORDER BY created_at DESC LIMIT 10`, [id]);
   const [ownHistory] = await db.execute(`SELECT created_at, action, details FROM audit_logs WHERE user_id = ? AND action IN ('REGISTER','EMAIL_VERIFIED','EMAIL_CHANGED','PASSWORD_CHANGED','MFA_ENABLED','MFA_DISABLED','RECEIPT_UPLOADED','RECEIPT_DELETED','RECEIPT_CSV_EXPORTED') ORDER BY created_at DESC LIMIT 15`, [id]);
   const [adminHistory] = await db.execute(`SELECT created_at, action, details FROM audit_logs WHERE action LIKE 'ADMIN_%' AND details LIKE ? ORDER BY created_at DESC LIMIT 10`, [`%user ${id}%`]);
   const actionHistory = [...ownHistory, ...adminHistory].sort((a, b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, 20);

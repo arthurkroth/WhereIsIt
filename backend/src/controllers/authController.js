@@ -308,15 +308,18 @@ async function login(req, res) {
   }
 
   const needsMfa = await authService.requiresMfa(user.id);
-  await audit.log(user.id, "LOGIN_ATTEMPT", `MFA enabled: ${needsMfa}`, req.ip);
 
-  if (needsMfa) return res.json({ mfaRequired: true, userId: user.id });
+  if (needsMfa) {
+    await audit.log(user.id, "LOGIN_ATTEMPT", "Credentials verified — MFA challenge sent", req.ip);
+    return res.json({ mfaRequired: true, userId: user.id });
+  }
 
   const token = authService.issueJwt({
     id: user.id, role: user.role,
     firstName: user.first_name, lastName: user.last_name
   });
 
+  await audit.log(user.id, "LOGIN_SUCCESS", "Login successful", req.ip);
   return res.json({ mfaRequired: false, token });
 }
 

@@ -1,10 +1,32 @@
 # Changelog
 
+## [1.0.0] - 20/07/2026 - Production hardening, IP logging, and login reliability fixes.
+
+### Fixed
+
+#### Real Client IP Addresses Now Recorded in Production
+- Audit log entries were displaying `::ffff:127.0.0.1` (the nginx loopback address) instead of the real client IP in the production deployment. Root cause: the nginx reverse proxy was not forwarding the `X-Forwarded-For` or `X-Real-IP` headers to the Node.js backend, so `req.ip` always resolved to the local proxy address despite `app.set('trust proxy', 1)` being correctly set in Express
+- Fixed by adding `proxy_set_header X-Real-IP $remote_addr` and `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for` to the API location block in `/etc/nginx/sites-available/whereisit` on the AWS EC2 server. All new audit log entries now record genuine client IP addresses
+
+#### Login History in Admin User Management Showed All Logins as "Failed"
+- The Recent Login History table on the Admin User Detail page displayed a red "Failed" badge for every login event, including successful ones. Root cause was two separate bugs that complemented each other:
+  1. `login()` in `authController.js` always logged a `LOGIN_ATTEMPT` event (including for successful non-MFA logins) but never logged `LOGIN_SUCCESS` for the non-MFA path - only `verifyMfaLogin()` logged `LOGIN_SUCCESS`, so non-MFA logins had no final success event at all
+  2. The admin controller's `recentLogins` query fetched both `LOGIN_SUCCESS` and `LOGIN_ATTEMPT`; the frontend badge rendered any action that was not exactly `LOGIN_SUCCESS` as a red "Failed" badge, so `LOGIN_ATTEMPT` always appeared as a failure
+- Fixed by:
+  - `authController.js` `login()`: for the non-MFA path, `LOGIN_ATTEMPT` is no longer logged; `LOGIN_SUCCESS` is now logged immediately after the JWT is issued. For the MFA path, `LOGIN_ATTEMPT` is still logged (credentials verified, TOTP challenge sent) and `LOGIN_SUCCESS` continues to be logged in `verifyMfaLogin()` after TOTP succeeds
+  - `adminController.js`: `recentLogins` query changed from `action IN ('LOGIN_SUCCESS', 'LOGIN_ATTEMPT')` to `action IN ('LOGIN_SUCCESS', 'ACCOUNT_LOCKED', 'MFA_LOGIN_LOCKED')` - only meaningful final outcomes are shown
+  - `AdminUserDetail.js`: badge renderer updated to show three states - green "Success" for `LOGIN_SUCCESS`, yellow "MFA Locked" for `MFA_LOGIN_LOCKED`, red "Locked" for `ACCOUNT_LOCKED`
+
+#### Suspended Account Login Showed Generic Error Message
+- When a suspended user attempted to log in, the frontend displayed the generic "Invalid email or password" message instead of informing the user their account was suspended. The backend was already returning HTTP `403` with `{ accountSuspended: true, error: "Your account has been suspended. Please contact support." }`, but the `catch` block in `Login.js` only handled the `emailNotVerified` case explicitly - all other `403` responses fell through to the generic error string
+- Fixed by adding an `else if (responseData?.accountSuspended)` branch in `Login.js` that displays the server-provided suspension message directly
+
+
 ## [0.8.1] - 11/07/2026 - Bug fixes and UI improvement.
 
 ### Fixed
 
-#### Account Deletion — Wrong Password Causing Unintended Logout
+#### Account Deletion - Wrong Password Causing Unintended Logout
 - `deleteAccount` in `authController.js` returned HTTP `401` when the password confirmation was incorrect. The axios response interceptor in `api.js` treats any `401` from a non-login endpoint as an expired session and immediately clears the token and redirects to `/login`, so entering a wrong password was silently logging the user out instead of showing an error. Changed status code to `403` so the interceptor ignores it and the error reaches the frontend handler correctly
 - `handleDeleteAccount` in `Profile.js` now calls `setDeletePassword('')` in the catch block, clearing the password field after a failed attempt so the user can type again without manually clearing it
 
@@ -17,15 +39,15 @@
   - `app.set('trust proxy', 1)` is already in place, so `req.ip` correctly resolves the real client IP from the `X-Forwarded-For` header behind the nginx reverse proxy on AWS
 
 #### Missing Warranty Field in OCR Upload Review
-- The "Warranty (months)" field was extracted by OCR and sent correctly on save, but was never rendered in the upload review form — users had no way to see or correct the extracted value before saving. The two-column layout row (Purchase Date, Total Price) was changed to three columns (Purchase Date, Total Price, Warranty months), adding a number input (`min="0"` `max="120"`) bound to `reviewHeader.warrantyMonths`
+- The "Warranty (months)" field was extracted by OCR and sent correctly on save, but was never rendered in the upload review form - users had no way to see or correct the extracted value before saving. The two-column layout row (Purchase Date, Total Price) was changed to three columns (Purchase Date, Total Price, Warranty months), adding a number input (`min="0"` `max="120"`) bound to `reviewHeader.warrantyMonths`
 
 ### Changed
 
-#### Profile Page — Premium Status Banner
-- Premium subscription status moved from a card at the bottom of the Account Details tab to a slim persistent banner between the tab navigation and all tab content. The banner is now visible regardless of which profile tab is active, and shows the expiry date (or "Permanent — no expiry") on the right-hand side
+#### Profile Page - Premium Status Banner
+- Premium subscription status moved from a card at the bottom of the Account Details tab to a slim persistent banner between the tab navigation and all tab content. The banner is now visible regardless of which profile tab is active, and shows the expiry date (or "Permanent - no expiry") on the right-hand side
 
-#### Profile Page — Danger Zone Redesign
-- Danger Zone removed from the Account Details tab body and replaced with a fixed bottom drawer anchored to the bottom of the viewport (respects the `--sidebar-width` CSS variable so it does not overlap the sidebar). Collapsed by default — shows only a thin `⚠ Danger Zone` bar. Clicking the bar slides the deletion form up with a CSS `max-height` transition. Closing the drawer resets the confirmation state, so it always starts fresh on next open. Confirmation form layout updated to an inline row (password field + action buttons side by side) to fit the compact drawer format
+#### Profile Page - Danger Zone Redesign
+- Danger Zone removed from the Account Details tab body and replaced with a fixed bottom drawer anchored to the bottom of the viewport (respects the `--sidebar-width` CSS variable so it does not overlap the sidebar). Collapsed by default - shows only a thin `⚠ Danger Zone` bar. Clicking the bar slides the deletion form up with a CSS `max-height` transition. Closing the drawer resets the confirmation state, so it always starts fresh on next open. Confirmation form layout updated to an inline row (password field + action buttons side by side) to fit the compact drawer format
 
 
 ## [0.8.0] - 06/07/2026 - Unit testing, security hardening, Premium subscription flow, and submission polish.
